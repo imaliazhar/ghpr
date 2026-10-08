@@ -26,7 +26,7 @@ ghpr        # opens the current branch's PR if there is one, otherwise the list
 ghpr --all  # always start on the list
 ```
 
-Results from the previous run show instantly while fresh data loads in the background.
+Results from the previous run show instantly while fresh data loads in the background. The status line at the bottom shows when data was last fetched; messages replace it for a few seconds.
 
 ## Statuses
 
@@ -51,6 +51,7 @@ ghpr looks through the git repos directly under `~/Projects` in the background, 
 
 | Key | Action |
 |---|---|
+| `?` | Show all keys (`esc` closes) |
 | `↑/↓` `j/k` | Move |
 | `g` / `G` | Jump to top / bottom |
 | `ctrl+u` / `ctrl+d` | Half a screen up / down (list) |

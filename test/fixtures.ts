@@ -10,8 +10,6 @@ export function pr(overrides: Partial<PR> = {}): PR {
 		title: `PR ${number}`,
 		url: `https://github.com/acme/app/pull/${number}`,
 		headRef: `branch-${number}`,
-		isDraft: false,
-		hasConflicts: false,
 		reviewDecision: 'REVIEW_REQUIRED',
 		labels: [],
 		requiredChecks: [],

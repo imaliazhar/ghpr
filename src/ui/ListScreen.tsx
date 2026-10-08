@@ -5,7 +5,7 @@ import type {Checkout} from '../checkouts.js';
 import type {PR} from '../github.js';
 import {ARCHIVED_TOGGLE, move, rowId, type ListView, type Motion} from '../listModel.js';
 import {STATUS_META, statusOf} from '../status.js';
-import {Footer, Tags, prActions} from './common.js';
+import {KeyHelp, prActions} from './common.js';
 import {TabBar, type Tab} from './TabBar.js';
 
 type Props = {
@@ -18,13 +18,14 @@ type Props = {
 	canOpen: boolean;
 	checkouts: Map<string, Checkout>;
 	active: boolean;
+	helpOpen: boolean;
 	showArchived: boolean;
 	onMove: (id: string) => void;
 	onOpen: (pr: PR) => void;
 	onToggleArchived: () => void;
 };
 
-export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, checkouts, active, showArchived, onMove, onOpen, onToggleArchived}: Props) {
+export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, checkouts, active, helpOpen, showArchived, onMove, onOpen, onToggleArchived}: Props) {
 	const listRef = useRef<DOMElement>(null);
 	const [listHeight, setListHeight] = useState(10);
 	useEffect(() => {
@@ -113,7 +114,6 @@ export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, 
 							)}
 							<Box flexGrow={1} flexShrink={1}>
 								<Text bold={isSel} dimColor={row.archived} wrap="truncate">
-									<Tags pr={row.pr} />
 									{row.pr.title}
 								</Text>
 							</Box>
@@ -122,17 +122,20 @@ export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, 
 				})}
 				{start + height < rows.length && <Text dimColor>  ↓ {rows.length - start - height} more</Text>}
 			</Box>
-			<Footer
-				items={[
-					{key: '↑/↓', label: 'move'},
-					{key: 'g/G', label: 'top/bottom'},
-					{key: '←/→', label: 'repo'},
-					{key: 'enter', label: cursor === ARCHIVED_TOGGLE ? 'expand' : 'details'},
-					...prActions(focused, canQueue, canOpen),
-					{key: 'R', label: 'refresh'},
-					{key: 'q', label: inTmuxPopup ? 'hide' : 'quit'},
-				]}
-			/>
+			{helpOpen && (
+				<KeyHelp
+					items={[
+						{key: '↑/↓ j/k', label: 'move'},
+						{key: 'g/G', label: 'top / bottom'},
+						{key: 'ctrl+u/d', label: 'half a screen up / down'},
+						{key: '←/→ h/l', label: 'switch repo tab'},
+						{key: 'enter', label: cursor === ARCHIVED_TOGGLE ? 'expand archived' : 'PR details'},
+						...prActions(focused, canQueue, canOpen),
+						{key: 'R', label: 'refresh'},
+						{key: 'q', label: inTmuxPopup ? 'hide popup' : 'quit'},
+					]}
+				/>
+			)}
 		</Box>
 	);
 }

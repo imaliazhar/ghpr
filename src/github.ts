@@ -13,8 +13,6 @@ export type PR = {
 	title: string;
 	url: string;
 	headRef: string;
-	isDraft: boolean;
-	hasConflicts: boolean;
 	reviewDecision: string | null;
 	labels: {name: string; color: string}[];
 	requiredChecks: Check[];
@@ -35,8 +33,6 @@ type RawPR = {
 	title: string;
 	url: string;
 	headRefName: string;
-	isDraft: boolean;
-	mergeable: string;
 	reviewDecision: string | null;
 	labels: {nodes: {name: string; color: string}[]};
 	latestReviews: {nodes: {author: {__typename: string; login: string} | null; state: string}[]};
@@ -84,7 +80,7 @@ async function findBranchPR(branch: Branch): Promise<Ref | null> {
 
 function prFields(number: number) {
 	return `pullRequest(number: ${number}) {
-		number title url headRefName isDraft mergeable reviewDecision
+		number title url headRefName reviewDecision
 		labels(first: 30) { nodes { name color } }
 		latestReviews(first: 30) { nodes { author { __typename login } state } }
 		reviewRequests(first: 30) { nodes { requestedReviewer {
@@ -119,8 +115,6 @@ function toPR(ref: Ref, raw: RawPR): PR {
 		title: raw.title,
 		url: raw.url,
 		headRef: raw.headRefName,
-		isDraft: raw.isDraft,
-		hasConflicts: raw.mergeable === 'CONFLICTING',
 		reviewDecision: raw.reviewDecision,
 		labels: raw.labels.nodes,
 		requiredChecks: required.map(toCheck),

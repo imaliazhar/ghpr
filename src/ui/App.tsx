@@ -2,7 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {openUrl, queueForMerge, setLabel} from '../actions.js';
 import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sessionName} from '../tmux.js';
-import {currentBranch, findBranchPr, type Branch} from '../git.js';
+import {currentBranch, findBranchPr} from '../git.js';
 import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
 import {fetchAll, type PR} from '../github.js';
 import {listView, toggleArchived} from '../listModel.js';
@@ -26,6 +26,15 @@ function age(ms: number) {
 	return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
+function Updated({at}: {at: number}) {
+	const [now, setNow] = useState(Date.now);
+	useEffect(() => {
+		const id = setInterval(() => setNow(Date.now()), 15_000);
+		return () => clearInterval(id);
+	}, []);
+	return <>updated {age(now - at)}</>;
+}
+
 export function App({all}: {all: boolean}) {
 	const {exit} = useApp();
 	const branch = useMemo(() => (all ? Promise.resolve(null) : currentBranch()), [all]);
@@ -44,7 +53,8 @@ export function App({all}: {all: boolean}) {
 	const [cursor, setCursor] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [note, setNote] = useState<string | null>(null);
+	const [fetchedAt, setFetchedAt] = useState<number | null>(() => cache?.savedAt ?? null);
+	const [helpOpen, setHelpOpen] = useState(false);
 	const [message, setMessage] = useState<Message | null>(null);
 	const [confirm, setConfirm] = useState<PR | null>(null);
 	const [checkouts, setCheckouts] = useState<Checkout[] | null>(null);
@@ -62,19 +72,18 @@ export function App({all}: {all: boolean}) {
 		setArchived(next);
 	};
 
-	const applyStartView = (b: Branch | null, prs: PR[], current: PR | null) => {
+	const applyStartView = (prs: PR[], current: PR | null) => {
 		startViewApplied.current = true;
-		if (current) {
-			if (prs.some(p => p.repo === current.repo)) setTab(current.repo);
-			setScreen({kind: 'detail', url: current.url});
-		} else if (b) setNote(`No open PR for ${b.branch}`);
+		if (!current) return;
+		if (prs.some(p => p.repo === current.repo)) setTab(current.repo);
+		setScreen({kind: 'detail', url: current.url});
 	};
 
 	useEffect(() => {
 		if (!cache) return;
 		branch.then(b => {
 			const match = b && findBranchPr(cache.mine, b);
-			if (match && !startViewApplied.current && !hasInteracted.current) applyStartView(b, cache.mine, match);
+			if (match && !startViewApplied.current && !hasInteracted.current) applyStartView(cache.mine, match);
 		});
 	}, [cache, branch]);
 
@@ -88,6 +97,7 @@ export function App({all}: {all: boolean}) {
 			setFresh(true);
 			setError(null);
 			prCache.save(result.mine);
+			setFetchedAt(Date.now());
 
 			const openUrls = new Set(result.mine.map(p => p.url));
 			setArchived(prev => {
@@ -97,7 +107,7 @@ export function App({all}: {all: boolean}) {
 				return kept;
 			});
 
-			if (!startViewApplied.current && !hasInteracted.current) applyStartView(b, result.mine, result.current);
+			if (!startViewApplied.current && !hasInteracted.current) applyStartView(result.mine, result.current);
 		} catch (e) {
 			setError(errorText(e));
 		} finally {
@@ -191,6 +201,11 @@ export function App({all}: {all: boolean}) {
 			setConfirm(null);
 			return;
 		}
+		if (helpOpen) {
+			if (key.escape || input === '?') setHelpOpen(false);
+			return;
+		}
+		if (input === '?' && (screen.kind === 'detail' || mine.length)) return setHelpOpen(true);
 		if (key.ctrl) return;
 		if (input === 'q' || (key.escape && screen.kind === 'list')) return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
 		if (input === 'R') {
@@ -211,36 +226,20 @@ export function App({all}: {all: boolean}) {
 
 	return (
 		<Box flexDirection="column" width={columns} height={terminalRows - 1}>
-			<Box marginBottom={1} flexShrink={0}>
-				<Text bold>My open PRs </Text>
-				<Text dimColor>{mine.length || !loading ? `${mine.length} open` : ''}</Text>
-				{loading && (
-					<Text color="yellow">
-						{'  '}
-						<Spinner /> {fresh || !cache ? 'loading' : `showing results from ${age(Date.now() - cache.savedAt)}, refreshing`}
-					</Text>
-				)}
-			</Box>
-			{error && <Text color="red">{error}</Text>}
-			{screen.kind === 'list' && note && <Text color="yellow">{note}</Text>}
-
 			{screen.kind === 'detail' && detailPr ? (
 				<DetailScreen
 					key={detailPr.url}
 					pr={detailPr}
-					archived={archived.has(detailPr.url)}
 					canQueue={canQueue(detailPr)}
 					canOpen={canOpen(detailPr)}
 					checkout={checkoutMap.get(detailPr.url)}
-					active={!confirm}
-					onBack={() => {
-						setNote(null);
-						setScreen({kind: 'list'});
-					}}
+					active={!confirm && !helpOpen}
+					helpOpen={helpOpen}
+					onBack={() => setScreen({kind: 'list'})}
 					onRetry={() => flash('Retry is coming in phase 2', 'gray')}
 					onMissingLink={() => flash('This check has no details link', 'gray')}
 				/>
-			) : !loading && mine.length === 0 && !error ? (
+			) : !loading && mine.length === 0 ? (
 				<Text dimColor>No open PRs 🎉</Text>
 			) : (
 				<ListScreen
@@ -255,7 +254,8 @@ export function App({all}: {all: boolean}) {
 					canQueue={canQueue(focused)}
 					canOpen={canOpen(focused)}
 					checkouts={checkoutMap}
-					active={!confirm}
+					active={!confirm && !helpOpen}
+					helpOpen={helpOpen}
 					showArchived={showArchived}
 					onMove={setCursor}
 					onOpen={pr => setScreen({kind: 'detail', url: pr.url})}
@@ -263,13 +263,35 @@ export function App({all}: {all: boolean}) {
 				/>
 			)}
 
-			{confirm ? (
-				<Text color="yellow" bold>
-					Queue {confirm.repo}#{confirm.number} via GitQueue? (y/n)
-				</Text>
-			) : (
-				message && <Text color={message.color}>{message.text}</Text>
-			)}
+			<Box flexShrink={0}>
+				<Box flexGrow={1}>
+					{confirm ? (
+						<Text color="yellow" bold>
+							Queue {confirm.repo}#{confirm.number} via GitQueue? (y/n)
+						</Text>
+					) : message ? (
+						<Text color={message.color} wrap="truncate">
+							{message.text}
+						</Text>
+					) : loading ? (
+						<Text color="yellow">
+							<Spinner /> {fetchedAt ? <>refreshing · <Updated at={fetchedAt} /></> : 'loading'}
+						</Text>
+					) : error ? (
+						<Text wrap="truncate">
+							<Text color="red">Refresh failed: {error.split('\n')[0]}</Text>
+							{fetchedAt && <Text dimColor> · <Updated at={fetchedAt} /></Text>}
+						</Text>
+					) : (
+						fetchedAt && (
+							<Text dimColor>
+								<Updated at={fetchedAt} />
+							</Text>
+						)
+					)}
+				</Box>
+				<Text dimColor> ? keys</Text>
+			</Box>
 		</Box>
 	);
 }

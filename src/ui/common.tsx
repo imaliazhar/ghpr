@@ -19,37 +19,50 @@ export function Labels({pr}: {pr: PR}) {
 	);
 }
 
-export function Tags({pr}: {pr: PR}) {
-	return (
-		<>
-			{pr.isDraft && <Text color="gray">[draft] </Text>}
-			{pr.hasConflicts && <Text color="red">[conflicts] </Text>}
-		</>
-	);
-}
+export type KeyItem = {key: string; label: string; enabled?: boolean};
 
-export type FooterItem = {key: string; label: string; enabled?: boolean};
-
-export function Footer({items}: {items: FooterItem[]}) {
+/** Key list drawn over its parent, which must fill the screen. Every cell is written so nothing shows through. */
+export function KeyHelp({items}: {items: KeyItem[]}) {
+	const footer = 'esc close';
+	const keyWidth = Math.max(...items.map(i => i.key.length));
+	const width = Math.max(footer.length, ...items.map(i => keyWidth + 2 + i.label.length));
+	const line = (text: string) => ` ${text.padEnd(width)} `;
 	return (
-		<Box marginTop={1} flexWrap="wrap" columnGap={2} flexShrink={0}>
-			{items.map(i => (
-				<Text key={i.key} dimColor={i.enabled === false} strikethrough={i.enabled === false}>
-					<Text color={i.enabled === false ? undefined : 'cyan'}>{i.key}</Text> {i.label}
-				</Text>
-			))}
+		<Box position="absolute" width="100%" height="100%" justifyContent="center" alignItems="center">
+			<Box borderStyle="round" borderColor="cyan" flexDirection="column">
+				<Text bold>{line('Keys')}</Text>
+				<Text>{line('')}</Text>
+				{items.map(i => {
+					const disabled = i.enabled === false;
+					return (
+						<Text key={i.key}>
+							{' '}
+							<Text color={disabled ? undefined : 'cyan'} dimColor={disabled} strikethrough={disabled}>
+								{i.key.padEnd(keyWidth)}
+							</Text>
+							{'  '}
+							<Text dimColor={disabled} strikethrough={disabled}>
+								{i.label}
+							</Text>
+							{' '.repeat(width - keyWidth - 2 - i.label.length + 1)}
+						</Text>
+					);
+				})}
+				<Text>{line('')}</Text>
+				<Text dimColor>{line(footer)}</Text>
+			</Box>
 		</Box>
 	);
 }
 
-export function prActions(pr: PR | undefined, ready: boolean, canOpen: boolean): FooterItem[] {
+export function prActions(pr: PR | undefined, ready: boolean, canOpen: boolean): KeyItem[] {
 	return [
-		{key: 'w', label: 'open PR', enabled: !!pr},
-		{key: 'o', label: 'session', enabled: canOpen},
-		{key: 'm', label: 'queue', enabled: ready},
-		{key: 't', label: 'tunnel', enabled: !!pr},
-		{key: 'b', label: 'in-review', enabled: !!pr},
-		{key: 'a', label: 'archive', enabled: !!pr},
+		{key: 'w', label: 'open PR in browser', enabled: !!pr},
+		{key: 'o', label: 'open tmux session for local checkout', enabled: canOpen},
+		{key: 'm', label: 'queue via GitQueue', enabled: ready},
+		{key: 't', label: 'toggle tunnel-review-vision', enabled: !!pr},
+		{key: 'b', label: 'toggle in-review', enabled: !!pr},
+		{key: 'a', label: 'archive / unarchive', enabled: !!pr},
 	];
 }
 
