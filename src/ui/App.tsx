@@ -6,6 +6,7 @@ import {currentBranch} from '../git.js';
 import {scanCheckouts, type Checkout} from '../checkouts.js';
 import {cleanUpWorkspace, UncommittedChangesError} from '../cleanup.js';
 import {fetchMerged, type PR} from '../github.js';
+import {awaitQueueReply} from '../gitQueue.js';
 import {confirmDiscard, handleKey, helpItems, initialInput, type Effect, type InputContext} from '../input.js';
 import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
 import {startView} from '../prData.js';
@@ -39,7 +40,7 @@ export function App({all}: {all: boolean}) {
 	const hasInteracted = useRef(false);
 	const {columns, rows: terminalRows} = useTerminalSize();
 	const data = usePrData(branch);
-	const {mine, current, fresh, loading, error, fetchedAt, reload, patch} = data;
+	const {mine, current, fresh, loading, error, fetchedAt, reload, patch, refetch} = data;
 
 	const [archived, setArchived] = useState(archivedPrs.load);
 	const [showArchived, setShowArchived] = useState(false);
@@ -130,18 +131,23 @@ export function App({all}: {all: boolean}) {
 		} catch (e) {
 			flash(errorText(e), 'red');
 		}
-		reload();
+		refetch(pr).catch(() => {});
 	};
 
 	const queue = async (pr: PR) => {
-		flash(`Queueing ${pr.repo}#${pr.number}…`, 'yellow');
+		const name = `${pr.repo}#${pr.number}`;
+		flash(`Asking GitQueue to queue ${name}…`, 'yellow');
 		try {
 			await queueForMerge(pr);
-			patch(pr.url, p => ({...p, queue: 'normal'}));
-			flash(`Queued ${pr.repo}#${pr.number} via GitQueue`);
 		} catch (e) {
-			flash(errorText(e), 'red');
+			return flash(errorText(e), 'red');
 		}
+		patch(pr.url, p => ({...p, queueDenied: null}));
+		flash(`Asked GitQueue to queue ${name}, waiting for its reply…`, 'yellow');
+		const answered = await awaitQueueReply(() => refetch(pr));
+		if (!answered) flash(`GitQueue hasn't replied about ${name} yet`, 'yellow');
+		else if (answered.queue) flash(`Queued ${name} in ${answered.queue}`);
+		else flash(`GitQueue denied ${name}: ${answered.queueDenied?.blocker}`, 'red');
 	};
 
 	const cleanUp = async (pr: PR, checkout: Checkout, discard = false) => {

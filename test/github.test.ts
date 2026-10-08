@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
 import {BOT_MARKER} from '../src/botReview.js';
-import {fetchAll, fetchMerged, type GraphQL} from '../src/github.js';
+import {fetchAll, fetchMerged, fetchPr, type GraphQL} from '../src/github.js';
 
 type Raw = Record<string, unknown> & {number: number; headRefName: string};
 
@@ -91,6 +91,7 @@ describe('fetchAll', () => {
 				check('e2e', {status: 'IN_PROGRESS', conclusion: null}),
 				{__typename: 'StatusContext', context: 'deploy', state: 'EXPECTED', targetUrl: null, isRequired: true},
 				check('docs', {status: 'COMPLETED', conclusion: 'FAILURE'}, false),
+				check('gateway', {status: 'IN_PROGRESS', conclusion: null}, false),
 			),
 		});
 		const {graphql} = fakeGitHub({'acme/app': {prs: [detailed]}}, [['acme/app', 1]]);
@@ -115,10 +116,12 @@ describe('fetchAll', () => {
 				{name: 'e2e', state: 'pending', url: 'https://ci/e2e'},
 				{name: 'deploy', state: 'pending', url: null},
 			],
-			optionalCheckCount: 1,
+			optionalCheckCount: 2,
+			pendingOptionalCount: 1,
 			reviews: [{author: 'ana', state: 'APPROVED'}],
 			waitingOn: ['cy', 'web-team'],
 			queue: 'normal',
+			queueDenied: null,
 		});
 		assert.equal(bot?.outcome, 'changes', 'the latest bot comment wins');
 	});
@@ -171,5 +174,14 @@ describe('fetchMerged', () => {
 		const {graphql} = fakeGitHub(repos, []);
 		const prs = await fetchMerged([branch('acme/gone', 'old'), branch('acme/app', 'feat')], graphql);
 		assert.deepEqual(prs.map(p => p.number), [3]);
+	});
+});
+
+describe('fetchPr', () => {
+	test('refetches one PR in one query', async () => {
+		const {graphql, queries} = fakeGitHub({'acme/app': {prs: [raw('acme/app', 1), raw('acme/app', 2, {title: 'renamed'})]}}, []);
+		const [stale] = (await fetchAll(null, fakeGitHub({'acme/app': {prs: [raw('acme/app', 2)]}}, [['acme/app', 2]]).graphql)).mine;
+		assert.equal((await fetchPr(stale, graphql)).title, 'renamed');
+		assert.equal(queries.length, 1);
 	});
 });

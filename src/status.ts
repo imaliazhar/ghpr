@@ -28,6 +28,6 @@ export function statusOf(pr: PR): Status {
 	if (pr.bot?.outcome === 'changes') return 'blocked';
 	if (hasLabel(pr, TUNNEL_LABEL)) return 'botReview';
 	if (pr.requiredChecks.some(c => c.state === 'failing')) return 'failing';
-	if (pr.requiredChecks.some(c => c.state === 'pending')) return 'pending';
+	if (pr.requiredChecks.some(c => c.state === 'pending') || pr.pendingOptionalCount > 0) return 'pending';
 	return pr.reviewDecision === null || pr.reviewDecision === 'APPROVED' ? 'ready' : 'approval';
 }

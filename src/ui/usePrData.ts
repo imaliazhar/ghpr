@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useReducer} from 'react';
 import type {Branch} from '../git.js';
-import {fetchAll, type PR} from '../github.js';
+import {fetchAll, fetchPr, type PR} from '../github.js';
 import {initialPrData, prDataReducer} from '../prData.js';
 import {prCache} from '../store.js';
 
@@ -31,5 +31,12 @@ export function usePrData(branch: Promise<Branch | null>) {
 
 	const patch = useCallback((url: string, patch: (pr: PR) => PR) => dispatch({type: 'patched', url, patch}), []);
 
-	return {...data, reload, patch};
+	/** Refetches just `pr`, keeping the rest. Resolves to it as it is on GitHub now. */
+	const refetch = useCallback(async (pr: PR) => {
+		const fresh = await fetchPr(pr);
+		patch(pr.url, () => fresh);
+		return fresh;
+	}, [patch]);
+
+	return {...data, reload, patch, refetch};
 }

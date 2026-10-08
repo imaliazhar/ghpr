@@ -119,6 +119,13 @@ export function ListScreen({tabs, tab, view, matches, leap, checkouts, claude, s
 									)}
 								</Text>
 							</Box>
+							{row.pr.queueDenied && (
+								<Box flexShrink={0}>
+									<Text color="red" dimColor>
+										{' '}queue denied
+									</Text>
+								</Box>
+							)}
 						</Box>
 					);
 				})}

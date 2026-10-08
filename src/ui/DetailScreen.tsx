@@ -93,7 +93,11 @@ function ChecksPanel({pr, selectedCheck, width}: {pr: PR; selectedCheck: number;
 		failing.length > 0 && <Text key="f" color="red">{failing.length} failing</Text>,
 		running.length > 0 && <Text key="r" color="yellow">{running.length} running</Text>,
 		passed.length > 0 && <Text key="p" color="green">{passed.length} passed</Text>,
-		pr.optionalCheckCount > 0 && <Text key="o" dimColor>+{pr.optionalCheckCount} optional</Text>,
+		pr.optionalCheckCount > 0 && (
+			<Text key="o" dimColor>
+				+{pr.optionalCheckCount} optional{pr.pendingOptionalCount > 0 && <Text color="yellow"> ({pr.pendingOptionalCount} running)</Text>}
+			</Text>
+		),
 	].filter(Boolean);
 	const paused = hasLabel(pr, TUNNEL_LABEL);
 	const runningRows = running.length ? Math.ceil(running.length / Math.max(1, Math.floor(width / MIN_CHECK_COLUMN))) + 1 : 0;
@@ -250,6 +254,11 @@ export function DetailScreen({pr, checkout, claude, selectedCheck}: Props) {
 					</Text>
 				</Box>
 				<Text bold>{pr.title}</Text>
+				{pr.queueDenied && (
+					<Text color="red" wrap="truncate">
+						✗ GitQueue denied {pr.queueDenied.lane}: <Text dimColor>{pr.queueDenied.blocker}</Text>
+					</Text>
+				)}
 				<Box gap={3}>
 					<Text dimColor wrap="truncate">
 						⎇ {pr.headRef}

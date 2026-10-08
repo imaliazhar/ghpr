@@ -2,7 +2,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {BOT_MARKER, parseBotReview, type BotReview} from './botReview.js';
 import {findBranchPr, type Branch} from './git.js';
-import {queuedLane} from './gitQueue.js';
+import {queueState, type QueueDenial} from './gitQueue.js';
 
 const run = promisify(execFile);
 
@@ -21,11 +21,15 @@ export type PR = {
 	labels: {name: string; color: string}[];
 	requiredChecks: Check[];
 	optionalCheckCount: number;
+	/** Optional checks still running, which GitQueue waits for too. */
+	pendingOptionalCount: number;
 	reviews: {author: string; state: string}[];
 	waitingOn: string[];
 	bot: BotReview | null;
 	/** The GitQueue lane the PR is queued in, or null when it isn't queued. */
 	queue: string | null;
+	/** GitQueue's latest refusal to queue the PR, while it isn't queued and hasn't been asked again. */
+	queueDenied: QueueDenial | null;
 };
 
 type Ref = {owner: string; name: string; number: number};
@@ -116,6 +120,8 @@ function toCheck(c: Context): Check {
 function toPR(ref: Ref, raw: RawPR): PR {
 	const contexts = raw.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
 	const required = contexts.filter(c => c.isRequired);
+	const optional = contexts.filter(c => !c.isRequired).map(toCheck);
+	const queue = queueState(raw.comments.nodes.map(c => ({author: c.author?.login ?? null, body: c.body})));
 	const botComment = raw.comments.nodes.filter(c => c.body.includes(BOT_MARKER)).at(-1);
 
 	return {
@@ -129,7 +135,8 @@ function toPR(ref: Ref, raw: RawPR): PR {
 		reviewDecision: raw.reviewDecision,
 		labels: raw.labels.nodes,
 		requiredChecks: required.map(toCheck),
-		optionalCheckCount: contexts.length - required.length,
+		optionalCheckCount: optional.length,
+		pendingOptionalCount: optional.filter(c => c.state === 'pending').length,
 		reviews: raw.latestReviews.nodes
 			.filter(r => r.author && r.author.__typename !== 'Bot' && r.state !== 'COMMENTED')
 			.map(r => ({author: r.author!.login, state: r.state})),
@@ -138,7 +145,8 @@ function toPR(ref: Ref, raw: RawPR): PR {
 			return name ? [name] : [];
 		}),
 		bot: botComment ? parseBotReview(botComment.body) : null,
-		queue: queuedLane(raw.comments.nodes.map(c => ({author: c.author?.login ?? null, body: c.body}))),
+		queue: queue.lane,
+		queueDenied: queue.denied,
 	};
 }
 
@@ -173,6 +181,13 @@ export async function fetchAll(branch: Branch | null, graphql: GraphQL = ghGraph
 	const prs = await fetchDetails(graphql, refs);
 
 	return {mine: prs.slice(0, mineRefs.length), current: branch ? findBranchPr(prs, branch) : null};
+}
+
+/** `pr` as it is on GitHub now. */
+export async function fetchPr(pr: PR, graphql: GraphQL = ghGraphql): Promise<PR> {
+	const [owner, name] = pr.repo.split('/');
+	const [fresh] = await fetchDetails(graphql, [{owner, name, number: pr.number}]);
+	return fresh;
 }
 
 const MERGED_LOOKUP_CHUNK_SIZE = 20;
