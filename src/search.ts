@@ -1,6 +1,7 @@
 import {Fzf, type FzfResultItem} from 'fzf';
 import type {PR} from './github.js';
 import type {KeyPress} from './keymap.js';
+import type {ListView} from './listModel.js';
 
 /** Matched PR urls mapped to the UTF-16 indexes of the matched characters in their titles. */
 export type TitleMatches = Map<string, Set<number>>;
@@ -12,7 +13,7 @@ type Word = {pr: PR; text: string; start: number};
  * never picked from across words. A PR matches when every term does. `best` is the highest scoring url,
  * earlier PRs winning ties.
  */
-export function matchTitles(prs: PR[], query: string): {matches: TitleMatches; best: string | null} {
+function matchTitles(prs: PR[], query: string): {matches: TitleMatches; best: string | null} {
 	const terms = query.split(/\s+/).filter(Boolean);
 	if (!terms.length) return {matches: new Map(), best: null};
 	const words = prs.flatMap(pr => [...pr.title.matchAll(/\S+/g)].map(m => ({pr, text: m[0], start: m.index})));
@@ -36,21 +37,43 @@ export function matchTitles(prs: PR[], query: string): {matches: TitleMatches; b
 	return {matches: new Map(ranked.map(pr => [pr.url, hits!.get(pr)!.positions])), best: best?.url ?? null};
 }
 
-/** The query after a key press while typing, 'done' to stop typing, or 'cancel' to drop the search. */
-export function editQuery(query: string, k: KeyPress & {backspace?: boolean; delete?: boolean}): string | 'done' | 'cancel' {
-	if (k.escape) return 'cancel';
-	if (k.return) return 'done';
-	if (k.backspace || k.delete) return query ? query.slice(0, -1) : 'cancel';
-	if (k.ctrl && k.input === 'u') return '';
-	if (k.ctrl || !k.input || k.upArrow || k.downArrow || k.leftArrow || k.rightArrow || k.tab) return query;
-	return query + k.input;
+const listedPrs = (view: ListView) => view.rows.flatMap(r => (r.kind === 'pr' ? [r.pr] : []));
+
+/** Matches `query` against the PRs listed in `view`. See `matchTitles`. */
+export const searchMatches = (view: ListView, query: string) => matchTitles(listedPrs(view), query);
+
+/**
+ * The search after a key press while typing. Typing jumps the cursor to the best match, `enter` stops
+ * typing (dropping an empty query), and `esc` or backspace on an empty query drops the search and puts
+ * the cursor back on `origin`. `cursor` is omitted when it shouldn't move.
+ */
+export function typeSearch(
+	query: string,
+	origin: string | null,
+	k: KeyPress & {backspace?: boolean; delete?: boolean},
+	view: ListView,
+): {query: string; typing: boolean; cursor?: string | null} {
+	const cancel = {query: '', typing: false, cursor: origin};
+	if (k.escape) return cancel;
+	if (k.return) return {query, typing: false};
+	let next = query;
+	if (k.backspace || k.delete) {
+		if (!query) return cancel;
+		next = query.slice(0, -1);
+	} else if (k.ctrl && k.input === 'u') next = '';
+	else if (k.ctrl || !k.input || k.upArrow || k.downArrow || k.leftArrow || k.rightArrow || k.tab) return {query, typing: true};
+	else next = query + k.input;
+	const {best} = searchMatches(view, next);
+	return best ? {query: next, typing: true, cursor: best} : {query: next, typing: true};
 }
 
-/** The next or previous matched url after `cursor` in list order, wrapping around. */
-export function cycleMatch(order: string[], matches: TitleMatches, cursor: string | null, direction: 1 | -1): string | null {
+/** The next or previous match after the cursor in list order, wrapping around. Null when nothing matches. */
+export function nextMatch(view: ListView, query: string, direction: 1 | -1): string | null {
+	const order = listedPrs(view).map(p => p.url);
+	const {matches} = searchMatches(view, query);
 	const matched = order.filter(url => matches.has(url));
 	if (!matched.length) return null;
-	const at = cursor ? order.indexOf(cursor) : -1;
+	const at = view.cursor ? order.indexOf(view.cursor) : -1;
 	const ahead = direction > 0 ? matched.find(url => order.indexOf(url) > at) : [...matched].reverse().find(url => order.indexOf(url) < at);
 	return ahead ?? (direction > 0 ? matched[0] : matched[matched.length - 1]);
 }

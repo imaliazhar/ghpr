@@ -47,6 +47,7 @@ export type Command =
 	| {type: 'toggleLabel'; pr: PR; label: string}
 	| {type: 'toggleArchive'; pr: PR}
 	| {type: 'search'}
+	| {type: 'leap'}
 	| {type: 'cycleMatch'; direction: 1 | -1}
 	| {type: 'clearSearch'};
 
@@ -93,6 +94,7 @@ const BINDINGS: Binding[] = [
 		match: k => isPrevTab(k) || isNextTab(k),
 		run: (_, k) => ({type: 'tab', delta: k && isPrevTab(k) ? -1 : 1}),
 	},
+	{keys: 's', label: 'leap to a PR by label', when: onList, match: plain('s'), run: () => ({type: 'leap'})},
 	{keys: '/', label: 'search titles', when: onList, match: plain('/'), run: () => ({type: 'search'})},
 	{
 		keys: 'n/N',

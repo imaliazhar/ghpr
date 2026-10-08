@@ -57,6 +57,7 @@ ghpr looks through the git repos directly under `~/Projects` in the background, 
 | `ctrl+u` / `ctrl+d` | Half a screen up / down (list) |
 | `←/→` `h/l` `tab` | Switch repo tab |
 | `enter` | Open PR details / open the selected failing check |
+| `s` | Leap: the icons of the PRs on screen turn into two-character labels; type one to jump there (`esc` or a wrong key cancels) |
 | `/` | Fuzzy search titles: matches are highlighted and the cursor jumps to the best one. `enter` stops typing, `esc` cancels |
 | `n` / `N` | Next / previous match |
 | `O` | Open the PR in the browser |

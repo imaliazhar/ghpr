@@ -5,11 +5,12 @@ import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sessionName} from '../t
 import {currentBranch} from '../git.js';
 import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
 import type {PR} from '../github.js';
-import {keyHelp, resolveKey, type Command, type KeyContext} from '../keymap.js';
+import {handleKey, helpItems, initialInput, type Effect, type InputContext} from '../input.js';
 import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
 import {startView} from '../prData.js';
 import {archivedPrs, lastTab} from '../store.js';
-import {cycleMatch, editQuery, matchTitles} from '../search.js';
+import {searchMatches} from '../search.js';
+import {statusLine, type Message} from '../statusLine.js';
 import {failingChecks, hasLabel} from '../status.js';
 import {KeyHelp, Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
@@ -18,27 +19,15 @@ import {buildTabs} from './TabBar.js';
 import {usePrData} from './usePrData.js';
 
 type Screen = {kind: 'list'} | {kind: 'detail'; url: string};
-type Message = {text: string; color: string};
-/** `typing` is true while keys go into the query; `origin` is the cursor to restore when it's cancelled. */
-type Search = {query: string; typing: boolean; origin: string | null};
-
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function age(ms: number) {
-	const minutes = Math.round(ms / 60_000);
-	if (minutes < 1) return 'just now';
-	if (minutes < 60) return `${minutes}m ago`;
-	const hours = Math.round(minutes / 60);
-	return hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
-}
-
-function Updated({at}: {at: number}) {
+function useNow(intervalMs: number) {
 	const [now, setNow] = useState(Date.now);
 	useEffect(() => {
-		const id = setInterval(() => setNow(Date.now()), 15_000);
+		const id = setInterval(() => setNow(Date.now()), intervalMs);
 		return () => clearInterval(id);
-	}, []);
-	return <>updated {age(now - at)}</>;
+	}, [intervalMs]);
+	return now;
 }
 
 export function App({all}: {all: boolean}) {
@@ -55,13 +44,12 @@ export function App({all}: {all: boolean}) {
 	const [tab, setTab] = useState<string | null>(lastTab.load);
 	const [screen, setScreen] = useState<Screen>({kind: 'list'});
 	const [cursor, setCursor] = useState<string | null>(null);
-	const [helpOpen, setHelpOpen] = useState(false);
 	const [message, setMessage] = useState<Message | null>(null);
-	const [confirm, setConfirm] = useState<PR | null>(null);
 	const [checkouts, setCheckouts] = useState<Checkout[] | null>(null);
 	const [listHeight, setListHeight] = useState(10);
 	const [checkIndex, setCheckIndex] = useState(0);
-	const [search, setSearch] = useState<Search | null>(null);
+	const [input, setInput] = useState(initialInput);
+	const now = useNow(15_000);
 
 	const flash = (text: string, color = 'green') => setMessage({text, color});
 
@@ -104,8 +92,7 @@ export function App({all}: {all: boolean}) {
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
 	const listOptions = useMemo(() => ({tab: activeTab, archived, showArchived}), [activeTab, archived, showArchived]);
 	const view = useMemo(() => listView(mine, listOptions, cursor), [mine, listOptions, cursor]);
-	const listedPrs = useMemo(() => view.rows.flatMap(r => (r.kind === 'pr' ? [r.pr] : [])), [view.rows]);
-	const matches = useMemo(() => matchTitles(listedPrs, search?.query ?? '').matches, [listedPrs, search?.query]);
+	const matches = useMemo(() => searchMatches(view, input.query).matches, [view, input.query]);
 
 	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...mine, current] : mine, checkouts ?? []), [mine, current, checkouts]);
 
@@ -149,22 +136,31 @@ export function App({all}: {all: boolean}) {
 	};
 
 	const failing = detailPr ? failingChecks(detailPr) : [];
-	const keyContext: KeyContext = {
-		screen: screen.kind,
-		pr: focused,
-		onArchivedToggle: screen.kind === 'list' && view.cursor === ARCHIVED_TOGGLE,
-		showArchived,
-		failingChecks: failing,
-		selectedCheck: failing[Math.min(checkIndex, failing.length - 1)],
-		fresh,
-		tmux: inTmuxPopup ? 'popup' : inTmux ? 'pane' : 'none',
-		checkout: focused && checkoutMap.get(focused.url),
-		scanning: checkouts === null,
-		searching: !!search,
+	const inputContext: InputContext = {
+		view,
+		listHeight,
+		keys: {
+			screen: screen.kind,
+			pr: focused,
+			onArchivedToggle: screen.kind === 'list' && view.cursor === ARCHIVED_TOGGLE,
+			showArchived,
+			failingChecks: failing,
+			selectedCheck: failing[Math.min(checkIndex, failing.length - 1)],
+			fresh,
+			tmux: inTmuxPopup ? 'popup' : inTmux ? 'pane' : 'none',
+			checkout: focused && checkoutMap.get(focused.url),
+			scanning: checkouts === null,
+		},
 	};
 
-	const run = (command: Command) => {
+	const run = (command: Effect) => {
 		switch (command.type) {
+			case 'setCursor':
+				return setCursor(command.id);
+			case 'queue':
+				return void queue(command.pr);
+			case 'flash':
+				return flash(command.text, command.color);
 			case 'move': {
 				const id = move(view, command.motion, listHeight);
 				if (id) setCursor(id);
@@ -206,51 +202,18 @@ export function App({all}: {all: boolean}) {
 					e => flash(errorText(e), 'red'),
 				);
 			}
-			case 'confirmQueue':
-				return setConfirm(command.pr);
 			case 'toggleLabel':
 				return void toggleLabel(command.pr, command.label);
 			case 'toggleArchive':
 				return toggleArchive(command.pr);
-			case 'search':
-				return setSearch({query: '', typing: true, origin: view.cursor});
-			case 'cycleMatch': {
-				const url = cycleMatch(listedPrs.map(p => p.url), matches, view.cursor, command.direction);
-				return url ? setCursor(url) : flash('No matches', 'gray');
-			}
-			case 'clearSearch':
-				return setSearch(null);
 		}
 	};
 
-	const typeSearch = (current: Search, next: ReturnType<typeof editQuery>) => {
-		if (next === 'cancel') {
-			setSearch(null);
-			return setCursor(current.origin);
-		}
-		if (next === 'done') return setSearch(current.query ? {...current, typing: false} : null);
-		const found = matchTitles(listedPrs, next);
-		if (found.best) setCursor(found.best);
-		setSearch({...current, query: next});
-	};
-
-	useInput((input, key) => {
+	useInput((ch, key) => {
 		hasInteracted.current = true;
-		if (confirm) {
-			if (input === 'y') queue(confirm);
-			else flash('Cancelled', 'gray');
-			setConfirm(null);
-			return;
-		}
-		if (helpOpen) {
-			if (key.escape || input === '?') setHelpOpen(false);
-			return;
-		}
-		if (search?.typing) return typeSearch(search, editQuery(search.query, {...key, input}));
-		if (input === '?') return setHelpOpen(true);
-		const result = resolveKey(keyContext, {...key, input});
-		if (result?.type === 'unavailable') flash(result.reason, 'gray');
-		else if (result) run(result);
+		const next = handleKey(input, inputContext, {...key, input: ch});
+		setInput(next.state);
+		next.effects.forEach(run);
 	});
 
 	return (
@@ -270,6 +233,7 @@ export function App({all}: {all: boolean}) {
 					tab={activeTab}
 					view={view}
 					matches={matches}
+					leap={input.mode.kind === 'leap' ? input.mode.leap : null}
 					checkouts={checkoutMap}
 					showArchived={showArchived}
 					onHeight={setListHeight}
@@ -278,45 +242,23 @@ export function App({all}: {all: boolean}) {
 
 			<Box flexShrink={0}>
 				<Box flexGrow={1}>
-					{confirm ? (
-						<Text color="yellow" bold>
-							Queue {confirm.repo}#{confirm.number} via GitQueue? (y/n)
-						</Text>
-					) : search?.typing ? (
-						<Text wrap="truncate">
-							<Text color="cyan">/{search.query}</Text>
-							<Text inverse> </Text>
-							{search.query && (
-								<Text color={matches.size ? undefined : 'red'} dimColor={matches.size > 0}>
-									{'  '}
-									{matches.size ? `${matches.size} matches` : 'no matches'}
+					<Text wrap="truncate">
+						{statusLine({...input, matchCount: matches.size, message, loading, error, fetchedAt, now}).map((span, i) =>
+							'spinner' in span ? (
+								<Text key={i} color={span.color}>
+									<Spinner />
 								</Text>
-							)}
-						</Text>
-					) : message ? (
-						<Text color={message.color} wrap="truncate">
-							{message.text}
-						</Text>
-					) : loading ? (
-						<Text color="yellow">
-							<Spinner /> {fetchedAt ? <>refreshing · <Updated at={fetchedAt} /></> : 'loading'}
-						</Text>
-					) : error ? (
-						<Text wrap="truncate">
-							<Text color="red">Refresh failed: {error.split('\n')[0]}</Text>
-							{fetchedAt && <Text dimColor> · <Updated at={fetchedAt} /></Text>}
-						</Text>
-					) : (
-						fetchedAt && (
-							<Text dimColor>
-								<Updated at={fetchedAt} />
-							</Text>
-						)
-					)}
+							) : (
+								<Text key={i} color={span.color} dimColor={span.dim} bold={span.bold} inverse={span.inverse}>
+									{span.text}
+								</Text>
+							),
+						)}
+					</Text>
 				</Box>
 				<Text dimColor> ? keys</Text>
 			</Box>
-			{helpOpen && <KeyHelp items={keyHelp(keyContext)} />}
+			{input.mode.kind === 'help' && <KeyHelp items={helpItems(input, inputContext)} />}
 		</Box>
 	);
 }

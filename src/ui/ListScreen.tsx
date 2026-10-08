@@ -1,7 +1,8 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, type DOMElement} from 'ink';
 import type {Checkout} from '../checkouts.js';
-import {rowId, type ListView} from '../listModel.js';
+import type {Leap} from '../leap.js';
+import {rowId, scrollStart, type ListView} from '../listModel.js';
 import {highlight, type TitleMatches} from '../search.js';
 import {STATUS_META, statusOf} from '../status.js';
 import {TabBar, type Tab} from './TabBar.js';
@@ -11,13 +12,14 @@ type Props = {
 	tab: string | null;
 	view: ListView;
 	matches: TitleMatches;
+	leap: Leap | null;
 	checkouts: Map<string, Checkout>;
 	showArchived: boolean;
 	/** Reports how many rows fit, for half-page motions. */
 	onHeight: (rows: number) => void;
 };
 
-export function ListScreen({tabs, tab, view, matches, checkouts, showArchived, onHeight}: Props) {
+export function ListScreen({tabs, tab, view, matches, leap, checkouts, showArchived, onHeight}: Props) {
 	const listRef = useRef<DOMElement>(null);
 	const [listHeight, setListHeight] = useState(10);
 	useEffect(() => {
@@ -31,8 +33,7 @@ export function ListScreen({tabs, tab, view, matches, checkouts, showArchived, o
 
 	const repoLabels = new Map(tabs.flatMap(t => (t.repo ? [[t.repo, t.label] as const] : [])));
 	const repoWidth = tab ? 0 : Math.min(24, Math.max(...[...repoLabels.values()].map(l => l.length))) + 2;
-	const selected = rows.findIndex(r => rowId(r) === cursor);
-	const start = Math.max(0, Math.min(selected - Math.floor(height / 2), rows.length - height));
+	const start = scrollStart(view, height);
 	const visible = rows.slice(start, start + height);
 
 	return (
@@ -61,19 +62,33 @@ export function ListScreen({tabs, tab, view, matches, checkouts, showArchived, o
 						);
 					}
 					const meta = STATUS_META[statusOf(row.pr)];
+					const label = leap?.labels.get(row.pr.url);
 					return (
 						<Box key={key}>
 							<Text color="cyan">{isSel ? '❯ ' : '  '}</Text>
-							<Box width={2} flexShrink={0}>
-								<Text color={meta.color} dimColor={row.archived}>
-									{meta.icon}
-								</Text>
-							</Box>
-							<Box width={2} flexShrink={0}>
-								<Text color="cyan" dimColor>
-									{checkouts.has(row.pr.url) ? '⌂' : ' '}
-								</Text>
-							</Box>
+							{label?.startsWith(leap!.typed) ? (
+								<Box width={4} flexShrink={0}>
+									<Text bold>
+										<Text color="gray">{leap!.typed}</Text>
+										<Text color="black" backgroundColor="#d7ffaf">
+											{label.slice(leap!.typed.length)}
+										</Text>
+									</Text>
+								</Box>
+							) : (
+								<>
+									<Box width={2} flexShrink={0}>
+										<Text color={meta.color} dimColor={row.archived}>
+											{meta.icon}
+										</Text>
+									</Box>
+									<Box width={2} flexShrink={0}>
+										<Text color="cyan" dimColor>
+											{checkouts.has(row.pr.url) ? '⌂' : ' '}
+										</Text>
+									</Box>
+								</>
+							)}
 							{repoWidth > 0 && (
 								<Box width={repoWidth} flexShrink={0}>
 									<Text dimColor wrap="truncate">

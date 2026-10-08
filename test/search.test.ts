@@ -1,61 +1,71 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
-import {cycleMatch, editQuery, highlight, matchTitles} from '../src/search.js';
-import {pr} from './fixtures.js';
+import {highlight, nextMatch, searchMatches, typeSearch} from '../src/search.js';
+import {pr, viewOf} from './fixtures.js';
 
-describe('matchTitles', () => {
-	test('fuzzy matches titles and picks the best scoring PR', () => {
-		const loose = pr({title: 'make it readonly'});
-		const tight = pr({title: 'fix Radio'});
-		const other = pr({title: 'add theme'});
-		const {matches, best} = matchTitles([loose, tight, other], 'rad');
+const titled = (...titles: string[]) => titles.map(title => pr({title}));
+const sorted = (positions: Set<number>) => [...positions].sort((a, b) => a - b);
+
+describe('searchMatches', () => {
+	test('fuzzy matches inside a word and picks the best scoring PR', () => {
+		const [loose, tight] = titled('make it readonly', 'fix Radio', 'add theme');
+		const {matches, best} = searchMatches(viewOf([loose, tight, pr({title: 'add theme'})]), 'rad');
 		assert.deepEqual([...matches.keys()], [loose.url, tight.url]);
 		assert.equal(best, tight.url);
-		assert.deepEqual([...matches.get(tight.url)!].sort((a, b) => a - b), [4, 5, 6]);
+		assert.deepEqual(sorted(matches.get(tight.url)!), [4, 5, 6]);
 	});
 
 	test('never picks letters from across words', () => {
-		const scattered = pr({title: 'Style Parity Check and Migration'});
-		const radio = pr({title: 'Dotty Radio and RadioCard'});
-		assert.deepEqual([...matchTitles([scattered, radio], 'radio').matches.keys()], [radio.url]);
+		const [scattered, radio] = titled('Style Parity Check and Migration', 'Dotty Radio and RadioCard');
+		assert.deepEqual([...searchMatches(viewOf([scattered, radio]), 'radio').matches.keys()], [radio.url]);
 	});
 
 	test('every term must match a word', () => {
-		const both = pr({title: 'Expo iOS Pipeline'});
-		const one = pr({title: 'Expo Native Build'});
-		const {matches} = matchTitles([both, one], 'expo pipe');
+		const [both, one] = titled('Expo iOS Pipeline', 'Expo Native Build');
+		const {matches} = searchMatches(viewOf([both, one]), 'expo pipe');
 		assert.deepEqual([...matches.keys()], [both.url]);
-		assert.deepEqual([...matches.get(both.url)!].sort((a, b) => a - b), [0, 1, 2, 3, 9, 10, 11, 12]);
+		assert.deepEqual(sorted(matches.get(both.url)!), [0, 1, 2, 3, 9, 10, 11, 12]);
 	});
 
 	test('matches nothing for an empty query', () => {
-		assert.deepEqual(matchTitles([pr()], ''), {matches: new Map(), best: null});
+		assert.deepEqual(searchMatches(viewOf([pr()]), ''), {matches: new Map(), best: null});
 	});
 });
 
-describe('editQuery', () => {
-	test('types, deletes, finishes and cancels', () => {
-		assert.equal(editQuery('fi', {input: 'x'}), 'fix');
-		assert.equal(editQuery('fix', {input: '', delete: true}), 'fi');
-		assert.equal(editQuery('', {input: '', backspace: true}), 'cancel');
-		assert.equal(editQuery('fix', {input: '', return: true}), 'done');
-		assert.equal(editQuery('fix', {input: '', escape: true}), 'cancel');
-		assert.equal(editQuery('fix', {input: 'u', ctrl: true}), '');
-		assert.equal(editQuery('fix', {input: '', upArrow: true}), 'fix');
+describe('typeSearch', () => {
+	const [radio, theme] = titled('fix Radio', 'add theme');
+	const view = viewOf([radio, theme], radio.url);
+	const key = (input: string, extra = {}) => ({input, ...extra});
+
+	test('typing jumps the cursor to the best match, and a miss leaves it alone', () => {
+		assert.deepEqual(typeSearch('the', null, key('m'), view), {query: 'them', typing: true, cursor: theme.url});
+		assert.deepEqual(typeSearch('zz', null, key('z'), view), {query: 'zzz', typing: true});
+	});
+
+	test('enter stops typing and keeps the query', () => {
+		assert.deepEqual(typeSearch('them', null, key('', {return: true}), view), {query: 'them', typing: false});
+	});
+
+	test('esc, or backspace on an empty query, drops the search and restores the cursor', () => {
+		const dropped = {query: '', typing: false, cursor: radio.url};
+		assert.deepEqual(typeSearch('them', radio.url, key('', {escape: true}), view), dropped);
+		assert.deepEqual(typeSearch('', radio.url, key('', {delete: true}), view), dropped);
+		assert.equal(typeSearch('them', null, key('', {delete: true}), view).query, 'the');
+		assert.equal(typeSearch('them', null, key('u', {ctrl: true}), view).query, '');
 	});
 });
 
-describe('cycleMatch', () => {
-	const order = ['a', 'b', 'c', 'd'];
-	const matches = new Map([['b', new Set([0])], ['d', new Set([0])]]);
+describe('nextMatch', () => {
+	const [a, b, c, d] = titled('alpha', 'fix one', 'gamma', 'fix two');
+	const at = (cursor: string) => viewOf([a, b, c, d], cursor);
 
 	test('moves to the next or previous match in list order and wraps', () => {
-		assert.equal(cycleMatch(order, matches, 'a', 1), 'b');
-		assert.equal(cycleMatch(order, matches, 'b', 1), 'd');
-		assert.equal(cycleMatch(order, matches, 'd', 1), 'b');
-		assert.equal(cycleMatch(order, matches, 'c', -1), 'b');
-		assert.equal(cycleMatch(order, matches, 'b', -1), 'd');
-		assert.equal(cycleMatch(order, new Map(), 'a', 1), null);
+		assert.equal(nextMatch(at(a.url), 'fix', 1), b.url);
+		assert.equal(nextMatch(at(b.url), 'fix', 1), d.url);
+		assert.equal(nextMatch(at(d.url), 'fix', 1), b.url);
+		assert.equal(nextMatch(at(c.url), 'fix', -1), b.url);
+		assert.equal(nextMatch(at(b.url), 'fix', -1), d.url);
+		assert.equal(nextMatch(at(a.url), 'zzz', 1), null);
 	});
 });
 

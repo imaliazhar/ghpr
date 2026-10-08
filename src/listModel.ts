@@ -47,6 +47,12 @@ export function listView(prs: PR[], options: ListOptions, cursor: string | null)
 	return {rows, cursor: cursor && ids.includes(cursor) ? cursor : (ids[0] ?? null)};
 }
 
+/** The first row index shown when `height` rows fit, keeping the cursor centred where possible. */
+export function scrollStart({rows, cursor}: ListView, height: number): number {
+	const selected = rows.findIndex(r => rowId(r) === cursor);
+	return Math.max(0, Math.min(selected - Math.floor(height / 2), rows.length - height));
+}
+
 /** Half-page motions move by `height / 2` visible rows, counting headers and gaps. */
 export function move({rows, cursor}: ListView, motion: Motion, height: number): string | null {
 	const ids = selectableIds(rows);

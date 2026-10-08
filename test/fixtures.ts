@@ -1,4 +1,5 @@
 import type {PR} from '../src/github.js';
+import {listView} from '../src/listModel.js';
 
 let next = 1;
 
@@ -24,3 +25,7 @@ export function pr(overrides: Partial<PR> = {}): PR {
 export const ready = (overrides: Partial<PR> = {}) => pr({reviewDecision: 'APPROVED', ...overrides});
 export const failing = (overrides: Partial<PR> = {}) =>
 	pr({requiredChecks: [{name: 'build', state: 'failing', url: null}], ...overrides});
+
+/** A list of `prs` in one status group (a header, then the PRs), with the cursor on `cursor`. */
+export const viewOf = (prs: PR[], cursor: string | null = null) =>
+	listView(prs, {tab: null, archived: new Set(), showArchived: false}, cursor);
