@@ -45,7 +45,7 @@ Only required checks count. Archived PRs sit collapsed at the bottom.
 
 ## Local checkouts
 
-ghpr looks through the git repos directly under `~/Projects` in the background, and marks PRs whose branch is checked out in one with `⌂`. Inside tmux, `o` switches to that checkout's session, named after its folder with `.` replaced by `_`. If the session doesn't exist, ghpr creates it in the folder and opens `$EDITOR`. In [tmux popup mode](#tmux-popup), `o` switches the client the popup was opened from, then hides the popup.
+ghpr looks through the git repos directly under `~/Projects` in the background, and marks PRs whose branch is checked out in one with `⌂`. Inside tmux, `o` switches to that checkout's session, named after its folder with `.` replaced by `_`. If the session doesn't exist, ghpr creates it in the folder with `$EDITOR` in window 1 and `claude` in window 2. It focuses window 2 whenever the session has one. In [tmux popup mode](#tmux-popup), `o` switches the client the popup was opened from, then hides the popup.
 
 ## Keys
 

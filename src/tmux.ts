@@ -42,7 +42,8 @@ async function outerClient(env: TmuxEnv) {
 }
 
 /**
- * Switches to the tmux session for `dir`, creating it with the editor open if it doesn't exist.
+ * Switches to the tmux session for `dir`, focused on window 2 (claude) when it has one. A new session
+ * gets the editor in window 1 and claude in window 2, both in `dir`.
  * From the popup, it switches the client the popup was opened from and hides the popup.
  */
 export async function openSession(dir: string, env: TmuxEnv = defaultEnv) {
@@ -50,8 +51,12 @@ export async function openSession(dir: string, env: TmuxEnv = defaultEnv) {
 	const exists = await env.run(['has-session', '-t', `=${name}`]).then(() => true, () => false);
 	if (!exists) {
 		await env.run(['new-session', '-d', '-s', name, '-c', dir, ...(env.editor ? ['-n', env.editor] : [])]);
-		if (env.editor) await env.run(['send-keys', '-t', `=${name}:`, env.editor, 'Enter']);
+		if (env.editor) await env.run(['send-keys', '-t', `=${name}:1`, env.editor, 'Enter']);
+		await env.run(['new-window', '-d', '-t', `=${name}:2`, '-n', 'claude', '-c', dir]);
+		await env.run(['send-keys', '-t', `=${name}:2`, 'claude', 'Enter']);
 	}
+	const windows = await env.run(['list-windows', '-t', `=${name}`, '-F', '#{window_index}']);
+	if (windows.split('\n').includes('2')) await env.run(['select-window', '-t', `=${name}:2`]);
 	if (!env.popupSession) return void (await env.run(['switch-client', '-t', `=${name}`]));
 	const client = await outerClient(env);
 	if (!client) throw new Error('No tmux client to switch');
