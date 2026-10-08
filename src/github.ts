@@ -1,7 +1,7 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {BOT_MARKER, parseBotReview, type BotReview} from './botReview.js';
-import type {Branch} from './git.js';
+import {findBranchPr, type Branch} from './git.js';
 
 const run = promisify(execFile);
 
@@ -163,7 +163,6 @@ export async function fetchAll(branch: Branch | null): Promise<{mine: PR[]; curr
 
 	const refs = branchRef && !mineRefs.some(r => sameRef(r, branchRef)) ? [...mineRefs, branchRef] : mineRefs;
 	const prs = await fetchDetails(refs);
-	const currentIndex = branchRef ? refs.findIndex(r => sameRef(r, branchRef)) : -1;
 
-	return {mine: prs.slice(0, mineRefs.length), current: currentIndex >= 0 ? prs[currentIndex] : null};
+	return {mine: prs.slice(0, mineRefs.length), current: branch ? findBranchPr(prs, branch) : null};
 }

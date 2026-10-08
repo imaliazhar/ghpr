@@ -1,5 +1,6 @@
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
+import type {PR} from './github.js';
 
 const run = promisify(execFile);
 
@@ -18,3 +19,6 @@ export async function currentBranch(): Promise<Branch | null> {
 		return null;
 	}
 }
+
+export const findBranchPr = (prs: PR[], branch: Branch) =>
+	prs.find(p => p.repo.toLowerCase() === `${branch.owner}/${branch.name}`.toLowerCase() && p.headRef === branch.branch) ?? null;

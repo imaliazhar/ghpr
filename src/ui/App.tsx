@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {hideTmuxPopup, inTmuxPopup, openUrl, queueForMerge, setLabel} from '../actions.js';
-import {currentBranch, type Branch} from '../git.js';
+import {currentBranch, findBranchPr, type Branch} from '../git.js';
 import {fetchAll, type PR} from '../github.js';
 import {listView, toggleArchived} from '../listModel.js';
 import {archivedPrs, lastTab, prCache} from '../store.js';
@@ -70,7 +70,7 @@ export function App({all}: {all: boolean}) {
 	useEffect(() => {
 		if (!cache) return;
 		branch.then(b => {
-			const match = b && cache.mine.find(p => p.repo.toLowerCase() === `${b.owner}/${b.name}`.toLowerCase() && p.headRef === b.branch);
+			const match = b && findBranchPr(cache.mine, b);
 			if (match && !startViewApplied.current && !hasInteracted.current) applyStartView(b, cache.mine, match);
 		});
 	}, [cache, branch]);
