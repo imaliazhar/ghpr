@@ -183,7 +183,7 @@ export function App({all}: {all: boolean}) {
 			case 'openDetail':
 				setCheckIndex(0);
 				return setScreen({kind: 'detail', url: command.pr.url});
-			case 'openCheck':
+			case 'openUrl':
 				return openUrl(command.url);
 			case 'back':
 				return setScreen({kind: 'list'});

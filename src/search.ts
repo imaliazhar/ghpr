@@ -44,7 +44,7 @@ export const searchMatches = (view: ListView, query: string) => matchTitles(list
 
 /**
  * The search after a key press while typing. Typing jumps the cursor to the best match, `enter` stops
- * typing (dropping an empty query), and `esc` or backspace on an empty query drops the search and puts
+ * typing (dropping an empty query) even when it arrives in the same input as typed text, and `esc` or backspace on an empty query drops the search and puts
  * the cursor back on `origin`. `cursor` is omitted when it shouldn't move.
  */
 export function typeSearch(
@@ -57,14 +57,19 @@ export function typeSearch(
 	if (k.escape) return cancel;
 	if (k.return) return {query, typing: false};
 	let next = query;
+	let typing = true;
 	if (k.backspace || k.delete) {
 		if (!query) return cancel;
 		next = query.slice(0, -1);
 	} else if (k.ctrl && k.input === 'u') next = '';
 	else if (k.ctrl || !k.input || k.upArrow || k.downArrow || k.leftArrow || k.rightArrow || k.tab) return {query, typing: true};
-	else next = query + k.input;
+	else {
+		const [text, ...afterEnter] = k.input.split(/[\r\n]/);
+		next = query + text.replace(/[\x00-\x1f\x7f]/g, '');
+		typing = afterEnter.length === 0;
+	}
 	const {best} = searchMatches(view, next);
-	return best ? {query: next, typing: true, cursor: best} : {query: next, typing: true};
+	return best ? {query: next, typing, cursor: best} : {query: next, typing};
 }
 
 /** The next or previous match after the cursor in list order, wrapping around. Null when nothing matches. */

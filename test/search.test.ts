@@ -44,6 +44,7 @@ describe('typeSearch', () => {
 
 	test('enter stops typing and keeps the query', () => {
 		assert.deepEqual(typeSearch('them', null, key('', {return: true}), view), {query: 'them', typing: false});
+		assert.deepEqual(typeSearch('', null, key('them\r\r'), view), {query: 'them', typing: false, cursor: theme.url});
 	});
 
 	test('esc, or backspace on an empty query, drops the search and restores the cursor', () => {

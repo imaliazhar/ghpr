@@ -62,6 +62,7 @@ ghpr looks through the git repos directly under `~/Projects` in the background, 
 | `n` / `N` | Next / previous match |
 | `O` | Open the PR in the browser |
 | `o` | Switch to the tmux session for the PR's local checkout, creating it if needed |
+| `ctrl+g` | Open the PR's repo in GitQueue (`app.gitqueue.com/install/<owner>/<repo>`) |
 | `m` | Queue via GitQueue (`/gitqueue add normal`), only when ready |
 | `t` | Toggle the `tunnel-review-vision` label |
 | `b` | Toggle the `in-review` label |

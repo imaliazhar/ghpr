@@ -28,9 +28,9 @@ function pressFor(keys: string): KeyPress {
 		'←': key('', {leftArrow: true}),
 		enter: key('', {return: true}),
 		esc: key('', {escape: true}),
-		ctrl: key('u', {ctrl: true}),
 	};
-	return named[first.replace(/\+.*/, '')] ?? key(first);
+	const ctrl = first.match(/^ctrl\+(.)$/);
+	return ctrl ? key(ctrl[1], {ctrl: true}) : (named[first] ?? key(first));
 }
 
 describe('resolveKey', () => {
@@ -77,6 +77,14 @@ describe('resolveKey', () => {
 		assert.deepEqual(reason(ctx({checkout})), {type: 'openSession', checkout});
 	});
 
+	test("ctrl+g opens the PR repo's GitQueue", () => {
+		assert.deepEqual(resolveKey(ctx({pr: pr({repo: 'goeuro/app'})}), key('g', {ctrl: true})), {
+			type: 'openUrl',
+			url: 'https://app.gitqueue.com/install/goeuro/app',
+		});
+		assert.deepEqual(resolveKey(ctx({pr: undefined}), key('g', {ctrl: true})), {type: 'unavailable', reason: 'No PR selected'});
+	});
+
 	test('only queues ready PRs with fresh data', () => {
 		const p = ready();
 		assert.deepEqual(resolveKey(ctx({pr: p}), key('m')), {type: 'confirmQueue', pr: p});
@@ -91,7 +99,7 @@ describe('resolveKey', () => {
 		];
 		const detail = (selected: number) => ctx({screen: 'detail', failingChecks: checks, selectedCheck: checks[selected]});
 		assert.deepEqual(resolveKey(detail(0), key('k')), {type: 'selectCheck', motion: 'up'});
-		assert.deepEqual(resolveKey(detail(0), key('', {return: true})), {type: 'openCheck', url: 'https://ci/a'});
+		assert.deepEqual(resolveKey(detail(0), key('', {return: true})), {type: 'openUrl', url: 'https://ci/a'});
 		assert.deepEqual(resolveKey(detail(1), key('', {return: true})), {type: 'unavailable', reason: 'This check has no details link'});
 		assert.equal(resolveKey(ctx({screen: 'detail'}), key('j')), null);
 	});

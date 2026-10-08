@@ -37,7 +37,7 @@ export type Command =
 	| {type: 'tab'; delta: 1 | -1}
 	| {type: 'toggleArchivedSection'}
 	| {type: 'openDetail'; pr: PR}
-	| {type: 'openCheck'; url: string}
+	| {type: 'openUrl'; url: string}
 	| {type: 'back'}
 	| {type: 'quit'}
 	| {type: 'refresh'}
@@ -75,6 +75,7 @@ const onListSearching = (ctx: KeyContext) => onList(ctx) && ctx.searching;
 const onDetailWithFailing = (ctx: KeyContext) => ctx.screen === 'detail' && ctx.failingChecks.length > 0;
 
 const NO_PR = 'No PR selected';
+const gitQueueUrl = (repo: string) => `https://app.gitqueue.com/install/${repo}`;
 const withPr = (make: (pr: PR) => Command | string) => (ctx: KeyContext) => (ctx.pr ? make(ctx.pr) : NO_PR);
 
 const BINDINGS: Binding[] = [
@@ -129,7 +130,7 @@ const BINDINGS: Binding[] = [
 		label: 'open check in browser',
 		when: onDetailWithFailing,
 		match: k => !!k.return,
-		run: ctx => (ctx.selectedCheck?.url ? {type: 'openCheck', url: ctx.selectedCheck.url} : 'This check has no details link'),
+		run: ctx => (ctx.selectedCheck?.url ? {type: 'openUrl', url: ctx.selectedCheck.url} : 'This check has no details link'),
 	},
 	{keys: 'r', label: 'retry check', when: onDetailWithFailing, match: plain('r'), run: () => 'Retry is coming in phase 2'},
 	{keys: 'O', label: 'open PR in browser', match: plain('O'), run: withPr(pr => ({type: 'openPr', pr}))},
@@ -143,6 +144,12 @@ const BINDINGS: Binding[] = [
 			if (ctx.checkout) return {type: 'openSession', checkout: ctx.checkout};
 			return ctx.scanning ? 'Still looking for local checkouts…' : `No checkout of ${ctx.pr.headRef} in ~/Projects`;
 		},
+	},
+	{
+		keys: 'ctrl+g',
+		label: "open the repo's GitQueue",
+		match: k => !!k.ctrl && k.input === 'g',
+		run: withPr(pr => ({type: 'openUrl', url: gitQueueUrl(pr.repo)})),
 	},
 	{
 		keys: 'm',

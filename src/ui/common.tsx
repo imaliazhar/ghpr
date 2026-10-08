@@ -3,17 +3,21 @@ import {Box, Text, useStdout} from 'ink';
 import type {PR} from '../github.js';
 import type {KeyItem} from '../keymap.js';
 
-function readableOn(hex: string) {
-	const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
-	return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? 'black' : 'white';
+/** Lifts dark label colours towards white so they stay visible on a dark terminal. */
+function visibleOnDark(hex: string) {
+	const rgb = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+	const [r, g, b] = rgb;
+	const lift = Math.max(0, 0.6 - (0.299 * r + 0.587 * g + 0.114 * b) / 255);
+	return '#' + rgb.map(c => Math.round(c + (255 - c) * lift).toString(16).padStart(2, '0')).join('');
 }
 
 export function Labels({pr}: {pr: PR}) {
 	return (
-		<Box gap={1} flexWrap="wrap">
+		<Box gap={2} flexWrap="wrap">
 			{pr.labels.map(l => (
-				<Text key={l.name} backgroundColor={`#${l.color}`} color={readableOn(l.color)}>
-					{` ${l.name} `}
+				<Text key={l.name}>
+					<Text color={visibleOnDark(l.color)}>●</Text>
+					<Text dimColor> {l.name}</Text>
 				</Text>
 			))}
 		</Box>
