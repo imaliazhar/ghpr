@@ -1,71 +1,13 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
 import {BOT_MARKER} from '../src/botReview.js';
-import {fetchAll, fetchMerged, fetchPr, type GraphQL} from '../src/github.js';
-
-type Raw = Record<string, unknown> & {number: number; headRefName: string};
-
-/** GitHub's raw fields for a PR in `repo`, with no labels, reviews, comments or checks unless overridden. */
-const raw = (repo: string, number: number, overrides: Partial<Raw> = {}): Raw => ({
-	number,
-	title: `PR ${number}`,
-	url: `https://github.com/${repo}/pull/${number}`,
-	headRefName: `branch-${number}`,
-	headRefOid: `sha-${number}`,
-	merged: false,
-	reviewDecision: null,
-	labels: {nodes: []},
-	latestReviews: {nodes: []},
-	reviewRequests: {nodes: []},
-	comments: {nodes: []},
-	commits: {nodes: [{commit: {statusCheckRollup: null}}]},
-	...overrides,
-});
-
-type Repo = {defaultBranch?: string; prs: Raw[]; merged?: Raw[]};
-
-/**
- * Answers the queries ghpr sends: the search for your PRs, PR details, and open or merged PR lookups by
- * branch, matching repo names in any case as GitHub does. A repo missing from `repos` fails its whole query, as GitHub does. Records each query.
- */
-function fakeGitHub(repos: Record<string, Repo>, mine: [repo: string, number: number][]) {
-	const queries: string[] = [];
-	const graphql: GraphQL = async <T,>(query: string) => {
-		queries.push(query);
-		if (query.includes('search(')) {
-			const nodes = mine.map(([repo, number]) => {
-				const [login, name] = repo.split('/');
-				return {number, repository: {owner: {login}, name}};
-			});
-			return {search: {nodes}} as T;
-		}
-		const data: Record<string, unknown> = {};
-		const blocks = [...query.matchAll(/(?:(\w+): )?repository\(owner: ("[^"]*"), name: ("[^"]*")\)/g)];
-		blocks.forEach((block, i) => {
-			const body = query.slice(block.index, blocks[i + 1]?.index);
-			const name = `${JSON.parse(block[2])}/${JSON.parse(block[3])}`;
-			const repo = Object.entries(repos).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
-			if (!repo) throw new Error(`Could not resolve to a Repository with the name '${name}'.`);
-			const number = body.match(/pullRequest\(number: (\d+)\)/)?.[1];
-			const lookup = body.match(/pullRequests\(headRefName: ("[^"]*"), states: (\w+)/);
-			let result: unknown;
-			if (number) result = {pullRequest: [...repo.prs, ...(repo.merged ?? [])].find(p => p.number === Number(number))};
-			else if (lookup) {
-				const [, branch, state] = lookup;
-				const nodes = (state === 'MERGED' ? (repo.merged ?? []) : repo.prs).filter(p => p.headRefName === JSON.parse(branch));
-				result = {defaultBranchRef: {name: repo.defaultBranch ?? 'main'}, pullRequests: {nodes: nodes.map(p => ({number: p.number}))}};
-			}
-			data[block[1] ?? 'repository'] = result;
-		});
-		return data as T;
-	};
-	return {graphql, queries};
-}
+import {createGitHub} from '../src/github.js';
+import {fakeGitHub, raw} from './fakeGitHub.js';
 
 const check = (name: string, fields: Record<string, unknown>, isRequired = true) => ({__typename: 'CheckRun', name, detailsUrl: `https://ci/${name}`, isRequired, ...fields});
 const rollup = (...contexts: unknown[]) => ({nodes: [{commit: {statusCheckRollup: {contexts: {nodes: contexts}}}}]});
 
-describe('fetchAll', () => {
+describe('pr', () => {
 	test("maps GitHub's fields into a PR", async () => {
 		const detailed = raw('acme/app', 1, {
 			reviewDecision: 'REVIEW_REQUIRED',
@@ -94,12 +36,9 @@ describe('fetchAll', () => {
 				check('gateway', {status: 'IN_PROGRESS', conclusion: null}, false),
 			),
 		});
-		const {graphql} = fakeGitHub({'acme/app': {prs: [detailed]}}, [['acme/app', 1]]);
+		const github = createGitHub(fakeGitHub({'acme/app': {prs: [detailed]}}).graphql);
 
-		const {mine, current} = await fetchAll(null, graphql);
-
-		assert.equal(current, null);
-		const {bot, ...pr} = mine[0];
+		const {bot, ...pr} = await github.pr('https://github.com/acme/app/pull/1');
 		assert.deepEqual(pr, {
 			repo: 'acme/app',
 			number: 1,
@@ -126,62 +65,66 @@ describe('fetchAll', () => {
 		assert.equal(bot?.outcome, 'changes', 'the latest bot comment wins');
 	});
 
-	test("adds the current branch's PR when it isn't one of yours, without listing it", async () => {
-		const theirs = raw('acme/web', 7, {headRefName: 'fix/x'});
-		const {graphql} = fakeGitHub({'acme/app': {prs: [raw('acme/app', 1)]}, 'acme/web': {prs: [theirs]}}, [['acme/app', 1]]);
-
-		const {mine, current} = await fetchAll({owner: 'Acme', name: 'Web', branch: 'fix/x'}, graphql);
-
-		assert.deepEqual(mine.map(p => p.number), [1]);
-		assert.equal(current?.url, 'https://github.com/acme/web/pull/7');
-	});
-
-	test('finds the current branch among your PRs without fetching it twice', async () => {
-		const {graphql, queries} = fakeGitHub({'acme/app': {prs: [raw('acme/app', 1, {headRefName: 'feat'})]}}, [['acme/app', 1]]);
-
-		const {mine, current} = await fetchAll({owner: 'acme', name: 'app', branch: 'feat'}, graphql);
-
-		assert.equal(current, mine[0]);
-		assert.equal(queries.filter(q => q.includes('pullRequest(number:')).length, 1);
-	});
-
-	test('fetches details four PRs per query, in search order', async () => {
+	test('fetches PRs asked for in the same tick four per query', async () => {
 		const prs = Array.from({length: 9}, (_, i) => raw('acme/app', i + 1));
-		const {graphql, queries} = fakeGitHub({'acme/app': {prs}}, prs.map(p => ['acme/app', p.number]));
+		const {graphql, queries} = fakeGitHub({'acme/app': {prs}});
+		const github = createGitHub(graphql);
 
-		const {mine} = await fetchAll(null, graphql);
+		const fetched = await Promise.all(prs.map(p => github.pr(p.url as string)));
 
-		assert.deepEqual(mine.map(p => p.number), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
-		assert.equal(queries.filter(q => q.includes('pullRequest(number:')).length, 3);
+		assert.deepEqual(fetched.map(p => p.number), [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+		assert.equal(queries.length, 3);
+		await github.pr(prs[0].url as string);
+		assert.equal(queries.length, 4, 'nothing is cached between ticks');
+	});
+
+	test('fails only the PRs GitHub has no data for', async () => {
+		const github = createGitHub(fakeGitHub({'acme/app': {prs: [raw('acme/app', 1)]}}).graphql);
+		const [found, missing] = await Promise.allSettled([github.pr('https://github.com/acme/app/pull/1'), github.pr('https://github.com/acme/app/pull/2')]);
+		assert.equal(found.status, 'fulfilled');
+		assert.equal(missing.status, 'rejected');
 	});
 });
 
-describe('fetchMerged', () => {
+describe('searchMine and branchPr', () => {
+	test('lists your PR urls in search order', async () => {
+		const github = createGitHub(fakeGitHub({}, [['acme/app', 2], ['acme/web', 1]]).graphql);
+		assert.deepEqual(await github.searchMine(), ['https://github.com/acme/app/pull/2', 'https://github.com/acme/web/pull/1']);
+	});
+
+	test("finds a branch's open PR, matching the repo in any case, and null when there is none or the repo is unknown", async () => {
+		const github = createGitHub(fakeGitHub({'acme/web': {prs: [raw('acme/web', 7, {headRefName: 'fix/x'})]}}).graphql);
+		assert.equal(await github.branchPr({owner: 'Acme', name: 'Web', branch: 'fix/x'}), 'https://github.com/acme/web/pull/7');
+		assert.equal(await github.branchPr({owner: 'acme', name: 'web', branch: 'other'}), null);
+		assert.equal(await github.branchPr({owner: 'acme', name: 'gone', branch: 'fix/x'}), null);
+	});
+});
+
+describe('mergedPr', () => {
 	const merged = raw('acme/app', 3, {headRefName: 'feat', merged: true});
 	const repos = {'acme/app': {prs: [], merged: [merged]}, 'acme/web': {defaultBranch: 'develop', prs: []}};
 	const branch = (repo: string, name: string) => ({owner: repo.split('/')[0], name: repo.split('/')[1], branch: name});
 
-	test("looks up every branch in one query, skipping default branches and branches with no merged PR", async () => {
-		const {graphql, queries} = fakeGitHub(repos, []);
+	test('looks up branches asked for in the same tick in one query, skipping default branches and branches with no merged PR', async () => {
+		const {graphql, queries} = fakeGitHub(repos);
+		const github = createGitHub(graphql);
 
-		const prs = await fetchMerged([branch('acme/app', 'feat'), branch('acme/app', 'feat'), branch('acme/web', 'develop'), branch('acme/app', 'wip')], graphql);
+		const urls = await Promise.all([branch('acme/app', 'feat'), branch('acme/web', 'develop'), branch('acme/app', 'wip')].map(github.mergedPr));
 
-		assert.deepEqual(prs.map(p => [p.number, p.merged]), [[3, true]]);
-		assert.equal(queries.length, 2, 'one lookup and one details query');
+		assert.deepEqual(urls, [merged.url, null, null]);
+		assert.equal(queries.length, 1);
+	});
+
+	test('looks up at most 20 branches per query', async () => {
+		const {graphql, queries} = fakeGitHub(repos);
+		const github = createGitHub(graphql);
+		await Promise.all(Array.from({length: 21}, (_, i) => github.mergedPr(branch('acme/app', `b${i}`))));
+		assert.equal(queries.length, 2);
 	});
 
 	test('skips a repo GitHub rejects without losing the rest of its batch', async () => {
-		const {graphql} = fakeGitHub(repos, []);
-		const prs = await fetchMerged([branch('acme/gone', 'old'), branch('acme/app', 'feat')], graphql);
-		assert.deepEqual(prs.map(p => p.number), [3]);
-	});
-});
-
-describe('fetchPr', () => {
-	test('refetches one PR in one query', async () => {
-		const {graphql, queries} = fakeGitHub({'acme/app': {prs: [raw('acme/app', 1), raw('acme/app', 2, {title: 'renamed'})]}}, []);
-		const [stale] = (await fetchAll(null, fakeGitHub({'acme/app': {prs: [raw('acme/app', 2)]}}, [['acme/app', 2]]).graphql)).mine;
-		assert.equal((await fetchPr(stale, graphql)).title, 'renamed');
-		assert.equal(queries.length, 1);
+		const github = createGitHub(fakeGitHub(repos).graphql);
+		const urls = await Promise.all([branch('acme/gone', 'old'), branch('acme/app', 'feat')].map(github.mergedPr));
+		assert.deepEqual(urls, [null, merged.url]);
 	});
 });

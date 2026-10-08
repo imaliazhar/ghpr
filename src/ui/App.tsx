@@ -1,25 +1,23 @@
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {openUrl, queueForMerge, setLabel} from '../actions.js';
 import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sendToClaude, sessionName} from '../tmux.js';
-import {currentBranch} from '../git.js';
-import {scanCheckouts, type Checkout} from '../checkouts.js';
+import type {Checkout} from '../checkouts.js';
 import {cleanUpWorkspace, UncommittedChangesError} from '../cleanup.js';
-import {fetchMerged, type PR} from '../github.js';
+import type {PR} from '../github.js';
 import {awaitQueueReply} from '../gitQueue.js';
 import {confirmDiscard, handleKey, helpItems, initialInput, type Effect, type InputContext} from '../input.js';
 import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
-import {startView} from '../prData.js';
+import type {PrSync} from '../prSync.js';
 import {archivedPrs, lastTab} from '../store.js';
 import {searchMatches} from '../search.js';
 import {statusLine, type Message} from '../statusLine.js';
 import {failingChecks, hasLabel} from '../status.js';
-import {workspace, type MergedLookup} from '../workspace.js';
+import {startView, workspace} from '../workspace.js';
 import {KeyHelp, Spinner, useClaudeStates, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
 import {ListScreen} from './ListScreen.js';
 import {buildTabs} from './TabBar.js';
-import {usePrData} from './usePrData.js';
 
 type Screen = {kind: 'list'} | {kind: 'detail'; url: string};
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -33,14 +31,13 @@ function useNow(intervalMs: number) {
 	return now;
 }
 
-export function App({all}: {all: boolean}) {
+export function App({sync}: {sync: PrSync}) {
 	const {exit} = useApp();
-	const branch = useMemo(() => (all ? Promise.resolve(null) : currentBranch()), [all]);
 	const startViewApplied = useRef(false);
 	const hasInteracted = useRef(false);
 	const {columns, rows: terminalRows} = useTerminalSize();
-	const data = usePrData(branch);
-	const {mine, current, fresh, loading, error, fetchedAt, reload, patch, refetch} = data;
+	const data = useSyncExternalStore(sync.subscribe, sync.getSnapshot);
+	const {mine, current, fresh, checkouts, leftover, merged, loading, error} = data;
 
 	const [archived, setArchived] = useState(archivedPrs.load);
 	const [showArchived, setShowArchived] = useState(false);
@@ -48,7 +45,6 @@ export function App({all}: {all: boolean}) {
 	const [screen, setScreen] = useState<Screen>({kind: 'list'});
 	const [cursor, setCursor] = useState<string | null>(null);
 	const [message, setMessage] = useState<Message | null>(null);
-	const [checkouts, setCheckouts] = useState<Checkout[] | null>(null);
 	const [listHeight, setListHeight] = useState(10);
 	const [checkIndex, setCheckIndex] = useState(0);
 	const [input, setInput] = useState(initialInput);
@@ -75,30 +71,14 @@ export function App({all}: {all: boolean}) {
 		if (!start) return;
 		if (start.tab) setTab(start.tab);
 		setScreen({kind: 'detail', url: start.url});
-	}, [current, fresh]);
+	}, [current]);
 
-	const scan = useCallback(() => {
-		scanCheckouts().then(setCheckouts);
-	}, []);
-
-	useEffect(scan, [scan]);
-
-	const [merged, setMerged] = useState<MergedLookup | null>(null);
 	const claudeStates = useClaudeStates();
 	const ws = useMemo(
-		() => workspace({mine, current, fresh, checkouts, merged, claudeStates}),
-		[mine, current, fresh, checkouts, merged, claudeStates],
+		() => workspace({mine, current, fresh, checkouts, leftover, merged, claudeStates}),
+		[mine, current, fresh, checkouts, leftover, merged, claudeStates],
 	);
-	const {listed, leftover, leftoverKey, checkoutOf, claudeOf} = ws;
-
-	useEffect(() => {
-		if (!leftover.length) return;
-		let cancelled = false;
-		fetchMerged(leftover).then(prs => cancelled || setMerged({key: leftoverKey, prs}), () => {});
-		return () => {
-			cancelled = true;
-		};
-	}, [leftoverKey]);
+	const {listed, checkoutOf, claudeOf} = ws;
 
 	useEffect(() => {
 		if (!ws.settled) return;
@@ -114,6 +94,12 @@ export function App({all}: {all: boolean}) {
 
 	const detailPr = screen.kind === 'detail' ? ws.find(screen.url) : undefined;
 	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? listed.find(p => p.url === view.cursor) : undefined;
+	const focusUrl = screen.kind === 'detail' ? screen.url : focused?.url;
+	const visibleUrls = view.rows.flatMap(row => (row.kind === 'pr' ? [row.pr.url] : []));
+
+	useEffect(() => {
+		sync.setFocus({focus: focusUrl ? [focusUrl] : [], visible: visibleUrls});
+	}, [focusUrl, visibleUrls.join('\n')]);
 
 	useEffect(() => {
 		if (screen.kind === 'detail' && !loading && !detailPr) setScreen({kind: 'list'});
@@ -121,7 +107,7 @@ export function App({all}: {all: boolean}) {
 
 	const toggleLabel = async (pr: PR, label: string) => {
 		const on = !hasLabel(pr, label);
-		patch(pr.url, p => ({
+		sync.patch(pr.url, p => ({
 			...p,
 			labels: on ? [...p.labels, {name: label, color: 'ededed'}] : p.labels.filter(l => l.name !== label),
 		}));
@@ -131,7 +117,7 @@ export function App({all}: {all: boolean}) {
 		} catch (e) {
 			flash(errorText(e), 'red');
 		}
-		refetch(pr).catch(() => {});
+		sync.refetch(pr.url).catch(() => {});
 	};
 
 	const queue = async (pr: PR) => {
@@ -142,9 +128,9 @@ export function App({all}: {all: boolean}) {
 		} catch (e) {
 			return flash(errorText(e), 'red');
 		}
-		patch(pr.url, p => ({...p, queueDenied: null}));
+		sync.patch(pr.url, p => ({...p, queueDenied: null}));
 		flash(`Asked GitQueue to queue ${name}, waiting for its reply…`, 'yellow');
-		const answered = await awaitQueueReply(() => refetch(pr));
+		const answered = await awaitQueueReply(() => sync.refetch(pr.url));
 		if (!answered) flash(`GitQueue hasn't replied about ${name} yet`, 'yellow');
 		else if (answered.queue) flash(`Queued ${name} in ${answered.queue}`);
 		else flash(`GitQueue denied ${name}: ${answered.queueDenied?.blocker}`, 'red');
@@ -154,10 +140,9 @@ export function App({all}: {all: boolean}) {
 		flash(`Cleaning up ${sessionName(checkout.dir)}…`, 'yellow');
 		try {
 			const done = await cleanUpWorkspace(checkout, pr.headSha, {discard});
-			setMerged(m => m && {...m, prs: m.prs.filter(p => p.url !== pr.url)});
 			if (screen.kind === 'detail') setScreen({kind: 'list'});
 			flash(`Cleaned up: ${done.join(', ')}`);
-			scan();
+			sync.rescan();
 		} catch (e) {
 			if (!(e instanceof UncommittedChangesError)) return flash(errorText(e), 'red');
 			setMessage(null);
@@ -172,6 +157,7 @@ export function App({all}: {all: boolean}) {
 		flash(next.archived.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
 	};
 
+	const fetchedAt = (focused && data.fetchedAt.get(focused.url)) ?? data.listedAt;
 	const failing = detailPr ? failingChecks(detailPr) : [];
 	const inputContext: InputContext = {
 		view,
@@ -229,8 +215,7 @@ export function App({all}: {all: boolean}) {
 			case 'quit':
 				return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
 			case 'refresh':
-				scan();
-				return void reload();
+				return sync.reload();
 			case 'openPr':
 				return openUrl(command.pr.url);
 			case 'openSession': {

@@ -2,30 +2,16 @@ import type {Checkout} from './checkouts.js';
 import type {ClaudeState} from './claudeState.js';
 import {isBranchOf} from './git.js';
 import type {PR} from './github.js';
+import type {PrSnapshot} from './prSync.js';
 
-/** Merged PRs found for the leftover checkouts that `key` names. */
-export type MergedLookup = {key: string; prs: PR[]};
-
-export type WorkspaceInput = {
-	mine: PR[];
-	current: PR | null;
-	/** True once `mine` and `current` come from GitHub rather than the cache. */
-	fresh: boolean;
-	/** Null while the local checkouts are being scanned. */
-	checkouts: Checkout[] | null;
-	/** The latest merged PR lookup, which may be for an earlier set of leftover checkouts. */
-	merged: MergedLookup | null;
+export type WorkspaceInput = Pick<PrSnapshot, 'mine' | 'current' | 'fresh' | 'checkouts' | 'leftover' | 'merged'> & {
 	claudeStates: Map<string, ClaudeState>;
 };
 
 export type Workspace = {
 	/** Your open PRs, then the merged PRs whose checkouts are still around. */
 	listed: PR[];
-	/** Checkouts on a branch with no open PR, to look up merged PRs for. Empty until `fresh`. */
-	leftover: Checkout[];
-	/** Identifies `leftover`, so a merged lookup can be matched to the checkouts it was for. */
-	leftoverKey: string;
-	/** True when `listed` is complete: data is fresh, checkouts are scanned and merged PRs are looked up. */
+	/** True when `listed` is complete: your PRs are fresh, checkouts are scanned and every leftover one is looked up. */
 	settled: boolean;
 	/** A listed PR, or the current branch's. */
 	find: (url: string) => PR | undefined;
@@ -34,11 +20,12 @@ export type Workspace = {
 };
 
 /** What ghpr shows, from GitHub's PRs, the local checkouts and their claude sessions. */
-export function workspace({mine, current, fresh, checkouts, merged, claudeStates}: WorkspaceInput): Workspace {
-	const open = current ? [...mine, current] : mine;
-	const leftover = fresh && checkouts ? checkouts.filter(c => !open.some(pr => isBranchOf(pr, c))) : [];
-	const leftoverKey = leftover.map(c => `${c.dir}@${c.branch}`).join('\n');
-	const mergedPrs = (merged?.prs ?? []).filter(m => !mine.some(p => p.url === m.url) && leftover.some(c => isBranchOf(m, c)));
+export function workspace({mine, current, fresh, checkouts, leftover, merged, claudeStates}: WorkspaceInput): Workspace {
+	const mergedPrs: PR[] = [];
+	for (const c of leftover) {
+		const pr = merged.get(c.dir);
+		if (pr && !mine.some(p => p.url === pr.url) && !mergedPrs.some(p => p.url === pr.url)) mergedPrs.push(pr);
+	}
 	const listed = [...mine, ...mergedPrs];
 
 	const all = current && !listed.some(p => p.url === current.url) ? [...listed, current] : listed;
@@ -52,11 +39,18 @@ export function workspace({mine, current, fresh, checkouts, merged, claudeStates
 
 	return {
 		listed,
-		leftover,
-		leftoverKey,
-		settled: fresh && checkouts !== null && (!leftover.length || merged?.key === leftoverKey),
+		settled: fresh && checkouts !== null && leftover.every(c => merged.has(c.dir)),
 		find: url => all.find(p => p.url === url),
 		checkoutOf,
 		claudeOf,
 	};
+}
+
+/**
+ * Where the app should start: the current branch's PR (and its repo tab, if that repo has PRs listed),
+ * `null` for the list when there is no such PR, or `undefined` while that isn't known yet.
+ */
+export function startView({mine, current}: Pick<PrSnapshot, 'mine' | 'current'>): {url: string; tab: string | undefined} | null | undefined {
+	if (!current) return current;
+	return {url: current.url, tab: mine.some(p => p.repo === current.repo) ? current.repo : undefined};
 }

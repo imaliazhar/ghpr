@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
 import type {Checkout} from '../src/checkouts.js';
-import {workspace, type WorkspaceInput} from '../src/workspace.js';
+import {startView, workspace, type WorkspaceInput} from '../src/workspace.js';
 import {pr} from './fixtures.js';
 
 const at = (dir: string, branch: string, repo = 'acme/app'): Checkout => {
@@ -14,7 +14,8 @@ const input = (overrides: Partial<WorkspaceInput> = {}): WorkspaceInput => ({
 	current: null,
 	fresh: true,
 	checkouts: [],
-	merged: null,
+	leftover: [],
+	merged: new Map(),
 	claudeStates: new Map(),
 	...overrides,
 });
@@ -22,28 +23,24 @@ const input = (overrides: Partial<WorkspaceInput> = {}): WorkspaceInput => ({
 describe('workspace', () => {
 	const open = pr({headRef: 'feat/open'});
 	const merged = pr({headRef: 'feat/done', merged: true});
-	const checkouts = [at('/p/open', 'feat/open'), at('/p/done', 'feat/done'), at('/p/main', 'main')];
+	const done = at('/p/done', 'feat/done');
+	const main = at('/p/main', 'main');
+	const checkouts = [at('/p/open', 'feat/open'), done, main];
 
-	test('checkouts with no open PR are leftovers, once data is fresh and checkouts are scanned', () => {
-		assert.deepEqual(workspace(input({mine: [open], checkouts})).leftover.map(c => c.dir), ['/p/done', '/p/main']);
-		assert.deepEqual(workspace(input({mine: [open], checkouts, fresh: false})).leftover, []);
-		assert.deepEqual(workspace(input({mine: [open], checkouts: null})).leftover, []);
+	test('lists the merged PRs of leftover checkouts after open ones, once each', () => {
+		const lookups = new Map([['/p/done', merged], ['/p/main', null], ['/p/again', merged]]);
+		const ws = workspace(input({mine: [open], checkouts, leftover: [done, main, at('/p/again', 'feat/done')], merged: lookups}));
+		assert.deepEqual(ws.listed, [open, merged]);
+		assert.deepEqual(workspace(input({mine: [open], checkouts, leftover: [main], merged: lookups})).listed, [open]);
 	});
 
-	test('lists merged PRs after open ones, only while their checkout is still a leftover', () => {
-		const lookup = {key: 'old', prs: [merged, open]};
-		assert.deepEqual(workspace(input({mine: [open], checkouts, merged: lookup})).listed, [open, merged]);
-		const cleanedUp = checkouts.filter(c => c.dir !== '/p/done');
-		assert.deepEqual(workspace(input({mine: [open], checkouts: cleanedUp, merged: lookup})).listed, [open]);
-	});
-
-	test('is settled once the merged lookup matches the current leftovers', () => {
-		const ws = workspace(input({mine: [open], checkouts}));
-		assert.equal(ws.settled, false);
-		assert.equal(workspace(input({mine: [open], checkouts, merged: {key: 'stale', prs: []}})).settled, false);
-		assert.equal(workspace(input({mine: [open], checkouts, merged: {key: ws.leftoverKey, prs: []}})).settled, true);
-		assert.equal(workspace(input({mine: [open], checkouts: [at('/p/open', 'feat/open')]})).settled, true, 'nothing to look up');
-		assert.equal(workspace(input({mine: [open], checkouts: null})).settled, false);
+	test('is settled once your PRs are fresh, checkouts are scanned and every leftover is looked up', () => {
+		const settled = (overrides: Partial<WorkspaceInput>) => workspace(input({mine: [open], checkouts, leftover: [done, main], ...overrides})).settled;
+		assert.equal(settled({merged: new Map([['/p/done', merged]])}), false);
+		assert.equal(settled({merged: new Map([['/p/done', merged], ['/p/main', null]])}), true);
+		assert.equal(settled({merged: new Map([['/p/done', merged], ['/p/main', null]]), fresh: false}), false);
+		assert.equal(settled({checkouts: null, leftover: []}), false);
+		assert.equal(settled({leftover: []}), true, 'nothing to look up');
 	});
 
 	test('maps PRs, including the current one, to the first checkout on their branch and its claude session', () => {
@@ -62,5 +59,19 @@ describe('workspace', () => {
 		assert.deepEqual([...ws.claudeOf], [[current.url, 'working']]);
 		assert.equal(ws.find(current.url), current);
 		assert.deepEqual(ws.listed, [open, fork]);
+	});
+});
+
+describe('startView', () => {
+	test("waits while the current branch's PR isn't known, and stays on the list when there is none", () => {
+		assert.equal(startView({mine: [], current: undefined}), undefined);
+		assert.equal(startView({mine: [], current: null}), null);
+	});
+
+	test("opens the branch PR and its repo tab when that repo has PRs listed", () => {
+		const mine = pr({repo: 'acme/app'});
+		const teammates = pr({repo: 'acme/other'});
+		assert.deepEqual(startView({mine: [mine], current: mine}), {url: mine.url, tab: 'acme/app'});
+		assert.deepEqual(startView({mine: [mine], current: teammates}), {url: teammates.url, tab: undefined});
 	});
 });

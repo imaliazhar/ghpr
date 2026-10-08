@@ -23,4 +23,3 @@ export async function currentBranch(cwd?: string): Promise<Branch | null> {
 export const isBranchOf = (pr: PR, branch: Branch) =>
 	pr.repo.toLowerCase() === `${branch.owner}/${branch.name}`.toLowerCase() && pr.headRef === branch.branch;
 
-export const findBranchPr = (prs: PR[], branch: Branch) => prs.find(p => isBranchOf(p, branch)) ?? null;

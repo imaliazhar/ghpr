@@ -26,7 +26,7 @@ ghpr        # opens the current branch's PR if there is one, otherwise the list
 ghpr --all  # always start on the list
 ```
 
-Results from the previous run show instantly while fresh data loads in the background. The status line at the bottom shows when data was last fetched; messages replace it for a few seconds.
+Results from the previous run show instantly, then each PR is refreshed as its data arrives: the PR you're looking at first, then the current tab, then the rest, then merged PRs of leftover checkouts. The PR you're looking at is refreshed every 20 seconds and the others every 3 minutes. The status line at the bottom shows when the highlighted PR was last fetched; messages replace it for a few seconds.
 
 ## Statuses
 
@@ -127,7 +127,7 @@ If tmux can't detach the session, ghpr quits.
 
 ## Local files
 
-- `~/.cache/ghpr/prs.json`: results from the last fetch
+- `~/.cache/ghpr/queries.json`: your PRs, merged PR lookups and local checkouts from the last run, with when each was fetched
 - `~/.cache/ghpr/claude/`: the state of each Claude Code session, written by `ghpr-claude-state`
 - `~/.config/ghpr/archived.json`: archived PRs
 - `~/.config/ghpr/state.json`: last selected repo tab

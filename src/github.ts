@@ -1,7 +1,8 @@
 import {execFile} from 'node:child_process';
+import DataLoader from 'dataloader';
 import {promisify} from 'node:util';
 import {BOT_MARKER, parseBotReview, type BotReview} from './botReview.js';
-import {findBranchPr, type Branch} from './git.js';
+import type {Branch} from './git.js';
 import {queueState, type QueueDenial} from './gitQueue.js';
 
 const run = promisify(execFile);
@@ -72,23 +73,28 @@ const ghGraphql: GraphQL = async query => JSON.parse(await gh(['api', 'graphql',
 
 const str = JSON.stringify;
 
-async function searchMine(graphql: GraphQL): Promise<Ref[]> {
-	const data = await graphql<{search: {nodes: {number: number; repository: {owner: {login: string}; name: string}}[]}}>(`{
-		search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
-			nodes { ... on PullRequest { number repository { owner { login } name } } }
-		}
-	}`);
-	return data.search.nodes.map(n => ({owner: n.repository.owner.login, name: n.repository.name, number: n.number}));
+/** The repo and number a PR url points at. */
+function refOf(url: string): Ref {
+	const [owner, name, , number] = new URL(url).pathname.split('/').filter(Boolean);
+	return {owner, name, number: Number(number)};
 }
 
-async function findBranchPR(graphql: GraphQL, branch: Branch): Promise<Ref | null> {
-	const data = await graphql<{repository: {pullRequests: {nodes: {number: number}[]}}}>(`{
-		repository(owner: ${str(branch.owner)}, name: ${str(branch.name)}) {
-			pullRequests(headRefName: ${str(branch.branch)}, states: OPEN, first: 1) { nodes { number } }
+async function searchMine(graphql: GraphQL): Promise<string[]> {
+	const data = await graphql<{search: {nodes: {url: string}[]}}>(`{
+		search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
+			nodes { ... on PullRequest { url } }
 		}
 	}`);
-	const number = data.repository.pullRequests.nodes[0]?.number;
-	return number ? {owner: branch.owner, name: branch.name, number} : null;
+	return data.search.nodes.map(n => n.url);
+}
+
+async function findBranchPr(graphql: GraphQL, branch: Branch): Promise<string | null> {
+	const data = await graphql<{repository: {pullRequests: {nodes: {url: string}[]}}}>(`{
+		repository(owner: ${str(branch.owner)}, name: ${str(branch.name)}) {
+			pullRequests(headRefName: ${str(branch.branch)}, states: OPEN, first: 1) { nodes { url } }
+		}
+	}`);
+	return data.repository.pullRequests.nodes[0]?.url ?? null;
 }
 
 function prFields(number: number) {
@@ -150,77 +156,65 @@ function toPR(ref: Ref, raw: RawPR): PR {
 	};
 }
 
-const CHUNK_SIZE = 4;
-
-async function fetchChunk(graphql: GraphQL, refs: Ref[]): Promise<PR[]> {
+async function fetchPrs(graphql: GraphQL, urls: readonly string[]): Promise<(PR | Error)[]> {
+	const refs = urls.map(refOf);
 	const fields = refs
 		.map((ref, i) => `p${i}: repository(owner: ${str(ref.owner)}, name: ${str(ref.name)}) { ${prFields(ref.number)} }`)
 		.join('\n');
-	const data = await graphql<Record<string, {pullRequest: RawPR}>>(`{ ${fields} }`);
-	return refs.map((ref, i) => toPR(ref, data[`p${i}`].pullRequest));
+	const data = await graphql<Record<string, {pullRequest: RawPR | null} | null>>(`{ ${fields} }`);
+	return refs.map((ref, i) => {
+		const raw = data[`p${i}`]?.pullRequest;
+		return raw ? toPR(ref, raw) : new Error(`${urls[i]} not found`);
+	});
 }
 
-const chunked = <T>(items: T[], size: number) =>
-	Array.from({length: Math.ceil(items.length / size)}, (_, i) => items.slice(i * size, (i + 1) * size));
-
-async function fetchDetails(graphql: GraphQL, refs: Ref[]): Promise<PR[]> {
-	return (await Promise.all(chunked(refs, CHUNK_SIZE).map(chunk => fetchChunk(graphql, chunk)))).flat();
-}
-
-const sameRef = (a: Ref, b: Ref) =>
-	a.number === b.number && a.owner.toLowerCase() === b.owner.toLowerCase() && a.name.toLowerCase() === b.name.toLowerCase();
-
-/** Your open PRs, and the open PR for `branch` when there is one. */
-export async function fetchAll(branch: Branch | null, graphql: GraphQL = ghGraphql): Promise<{mine: PR[]; current: PR | null}> {
-	const [mineRefs, branchRef] = await Promise.all([
-		searchMine(graphql),
-		branch ? findBranchPR(graphql, branch).catch(() => null) : Promise.resolve(null),
-	]);
-
-	const refs = branchRef && !mineRefs.some(r => sameRef(r, branchRef)) ? [...mineRefs, branchRef] : mineRefs;
-	const prs = await fetchDetails(graphql, refs);
-
-	return {mine: prs.slice(0, mineRefs.length), current: branch ? findBranchPr(prs, branch) : null};
-}
-
-/** `pr` as it is on GitHub now. */
-export async function fetchPr(pr: PR, graphql: GraphQL = ghGraphql): Promise<PR> {
-	const [owner, name] = pr.repo.split('/');
-	const [fresh] = await fetchDetails(graphql, [{owner, name, number: pr.number}]);
-	return fresh;
-}
-
-const MERGED_LOOKUP_CHUNK_SIZE = 20;
-
-/** The merged PR for each checked out branch, or null when the branch is its repo's default one or has no merged PR. */
-async function findMergedPRs(graphql: GraphQL, branches: Branch[]): Promise<(Ref | null)[]> {
+/** The merged PR url for each branch, or null when the branch is its repo's default one or has no merged PR. */
+async function findMergedPrs(graphql: GraphQL, branches: readonly Branch[]): Promise<(string | null)[]> {
 	const fields = branches
 		.map(
 			(b, i) => `b${i}: repository(owner: ${str(b.owner)}, name: ${str(b.name)}) {
 				defaultBranchRef { name }
-				pullRequests(headRefName: ${str(b.branch)}, states: MERGED, last: 1) { nodes { number } }
+				pullRequests(headRefName: ${str(b.branch)}, states: MERGED, last: 1) { nodes { url } }
 			}`,
 		)
 		.join('\n');
-	type Lookup = {defaultBranchRef: {name: string} | null; pullRequests: {nodes: {number: number}[]}} | null;
+	type Lookup = {defaultBranchRef: {name: string} | null; pullRequests: {nodes: {url: string}[]}} | null;
 	const data = await graphql<Record<string, Lookup>>(`{ ${fields} }`);
 	return branches.map((b, i) => {
 		const repo = data[`b${i}`];
-		const number = repo && repo.defaultBranchRef?.name !== b.branch ? repo.pullRequests.nodes[0]?.number : undefined;
-		return number ? {owner: b.owner, name: b.name, number} : null;
+		return (repo && repo.defaultBranchRef?.name !== b.branch && repo.pullRequests.nodes[0]?.url) || null;
 	});
 }
 
-/**
- * Merged PRs for the given checked out branches, looked up in batches. A batch GitHub rejects, such as one
- * with a deleted repo, is retried one branch at a time, skipping the branches that still can't be looked up.
- */
-export async function fetchMerged(branches: Branch[], graphql: GraphQL = ghGraphql): Promise<PR[]> {
-	const lookOne = (branch: Branch) => findMergedPRs(graphql, [branch]).then(([ref]) => ref, () => null);
-	const lookups = await Promise.all(
-		chunked(branches, MERGED_LOOKUP_CHUNK_SIZE).map(chunk => findMergedPRs(graphql, chunk).catch(() => Promise.all(chunk.map(lookOne)))),
+const PR_BATCH_SIZE = 4;
+const MERGED_BATCH_SIZE = 20;
+
+export type GitHub = {
+	/** Urls of your open PRs, most recently updated first. */
+	searchMine(): Promise<string[]>;
+	/** The url of the open PR for `branch`, or null when there is none or its repo can't be looked up. */
+	branchPr(branch: Branch): Promise<string | null>;
+	/** The PR at `url` as it is on GitHub now. Calls made in the same tick share queries of up to 4 PRs. */
+	pr(url: string): Promise<PR>;
+	/**
+	 * The url of the merged PR for a checked out branch, or null when the branch is its repo's default one, has no
+	 * merged PR, or can't be looked up. Calls made in the same tick share queries of up to 20 branches; a query
+	 * GitHub rejects, such as one with a deleted repo, is retried one branch at a time.
+	 */
+	mergedPr(branch: Branch): Promise<string | null>;
+};
+
+export function createGitHub(graphql: GraphQL = ghGraphql): GitHub {
+	const prs = new DataLoader<string, PR>(urls => fetchPrs(graphql, urls), {maxBatchSize: PR_BATCH_SIZE, cache: false});
+	const lookOne = (branch: Branch) => findMergedPrs(graphql, [branch]).then(([url]) => url, () => null);
+	const merged = new DataLoader<Branch, string | null>(
+		branches => findMergedPrs(graphql, branches).catch(() => Promise.all(branches.map(lookOne))),
+		{maxBatchSize: MERGED_BATCH_SIZE, cache: false},
 	);
-	const refs: Ref[] = [];
-	for (const ref of lookups.flat()) if (ref && !refs.some(r => sameRef(r, ref))) refs.push(ref);
-	return fetchDetails(graphql, refs);
+	return {
+		searchMine: () => searchMine(graphql),
+		branchPr: branch => findBranchPr(graphql, branch).catch(() => null),
+		pr: url => prs.load(url),
+		mergedPr: branch => merged.load(branch),
+	};
 }
