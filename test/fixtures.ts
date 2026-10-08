@@ -18,6 +18,9 @@ export function pr(overrides: Partial<PR> = {}): PR {
 		reviews: [],
 		waitingOn: [],
 		bot: null,
+		queue: null,
+		merged: false,
+		headSha: 'abc123',
 		...overrides,
 	};
 }

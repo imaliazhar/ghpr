@@ -102,6 +102,7 @@ describe('resolveKey', () => {
 		assert.deepEqual(resolveKey(ctx({pr: p}), key('m')), {type: 'confirmQueue', pr: p});
 		assert.deepEqual(resolveKey(ctx({pr: p, fresh: false}), key('m')), {type: 'unavailable', reason: 'Wait for fresh data before queueing'});
 		assert.deepEqual(resolveKey(ctx({pr: failing()}), key('m')), {type: 'unavailable', reason: 'Not ready to merge'});
+		assert.deepEqual(resolveKey(ctx({pr: ready({queue: 'normal'})}), key('m')), {type: 'unavailable', reason: 'Already queued in normal'});
 	});
 
 	test('selects and opens failing checks on the detail screen', () => {

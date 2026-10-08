@@ -35,7 +35,7 @@ describe('statusLine', () => {
 	test('modes take priority over messages', () => {
 		const message = {text: 'Archived', color: 'green'};
 		const p = pr({repo: 'acme/app', number: 7});
-		assert.equal(text({mode: {kind: 'confirm', pr: p}, message}), 'Queue acme/app#7 via GitQueue? (y/n)');
+		assert.equal(text({mode: {kind: 'confirm', prompt: 'Queue it? (y/n)', effect: {type: 'queue', pr: p}}, message}), 'Queue it? (y/n)');
 		assert.equal(text({mode: {kind: 'leap', leap: {labels: new Map(), typed: ''}}, message}), 'leap: type a label · esc cancels');
 		assert.equal(text({mode: {kind: 'search', origin: null}, query: 'fix', matchCount: 2, message}), '/fix   2 matches');
 		assert.equal(text({mode: {kind: 'search', origin: null}, query: 'fix', matchCount: 1}), '/fix   1 match');

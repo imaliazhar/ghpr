@@ -46,6 +46,7 @@ export type Command =
 	| {type: 'composeClaude'; checkout: Checkout}
 	| {type: 'sendClaude'; checkout: Checkout; text: string}
 	| {type: 'confirmQueue'; pr: PR}
+	| {type: 'confirmCleanup'; pr: PR; checkout: Checkout}
 	| {type: 'toggleLabel'; pr: PR; label: string}
 	| {type: 'toggleArchive'; pr: PR}
 	| {type: 'search'}
@@ -174,7 +175,18 @@ const BINDINGS: Binding[] = [
 		run: ctx => {
 			if (!ctx.pr) return NO_PR;
 			if (!ctx.fresh) return 'Wait for fresh data before queueing';
+			if (ctx.pr.queue) return `Already queued in ${ctx.pr.queue}`;
 			return statusOf(ctx.pr) === 'ready' ? {type: 'confirmQueue', pr: ctx.pr} : 'Not ready to merge';
+		},
+	},
+	{
+		keys: 'X',
+		label: 'clean up a merged PR\'s workspace',
+		match: plain('X'),
+		run: ctx => {
+			if (!ctx.pr) return NO_PR;
+			if (!ctx.pr.merged) return 'Only merged PRs can be cleaned up';
+			return ctx.checkout ? {type: 'confirmCleanup', pr: ctx.pr, checkout: ctx.checkout} : 'No local workspace left';
 		},
 	},
 	{keys: 't', label: `toggle ${TUNNEL_LABEL}`, match: plain('t'), run: withPr(pr => ({type: 'toggleLabel', pr, label: TUNNEL_LABEL}))},

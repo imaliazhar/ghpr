@@ -2,6 +2,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {BOT_MARKER, parseBotReview, type BotReview} from './botReview.js';
 import {findBranchPr, type Branch} from './git.js';
+import {queuedLane} from './gitQueue.js';
 
 const run = promisify(execFile);
 
@@ -13,6 +14,9 @@ export type PR = {
 	title: string;
 	url: string;
 	headRef: string;
+	/** The commit the PR's branch points at on GitHub. */
+	headSha: string;
+	merged: boolean;
 	reviewDecision: string | null;
 	labels: {name: string; color: string}[];
 	requiredChecks: Check[];
@@ -20,6 +24,8 @@ export type PR = {
 	reviews: {author: string; state: string}[];
 	waitingOn: string[];
 	bot: BotReview | null;
+	/** The GitQueue lane the PR is queued in, or null when it isn't queued. */
+	queue: string | null;
 };
 
 type Ref = {owner: string; name: string; number: number};
@@ -33,11 +39,13 @@ type RawPR = {
 	title: string;
 	url: string;
 	headRefName: string;
+	headRefOid: string;
+	merged: boolean;
 	reviewDecision: string | null;
 	labels: {nodes: {name: string; color: string}[]};
 	latestReviews: {nodes: {author: {__typename: string; login: string} | null; state: string}[]};
 	reviewRequests: {nodes: {requestedReviewer: {login?: string; name?: string} | null}[]};
-	comments: {nodes: {body: string}[]};
+	comments: {nodes: {author: {login: string} | null; body: string}[]};
 	commits: {nodes: {commit: {statusCheckRollup: {contexts: {nodes: Context[]}} | null}}[]};
 };
 
@@ -80,13 +88,13 @@ async function findBranchPR(branch: Branch): Promise<Ref | null> {
 
 function prFields(number: number) {
 	return `pullRequest(number: ${number}) {
-		number title url headRefName reviewDecision
+		number title url headRefName headRefOid merged reviewDecision
 		labels(first: 30) { nodes { name color } }
 		latestReviews(first: 30) { nodes { author { __typename login } state } }
 		reviewRequests(first: 30) { nodes { requestedReviewer {
 			... on User { login } ... on Team { name } ... on Bot { login } ... on Mannequin { login }
 		} } }
-		comments(last: 30) { nodes { body } }
+		comments(last: 30) { nodes { author { login } body } }
 		commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
 			__typename
 			... on CheckRun { name status conclusion detailsUrl isRequired(pullRequestNumber: ${number}) }
@@ -115,6 +123,8 @@ function toPR(ref: Ref, raw: RawPR): PR {
 		title: raw.title,
 		url: raw.url,
 		headRef: raw.headRefName,
+		headSha: raw.headRefOid,
+		merged: raw.merged,
 		reviewDecision: raw.reviewDecision,
 		labels: raw.labels.nodes,
 		requiredChecks: required.map(toCheck),
@@ -127,6 +137,7 @@ function toPR(ref: Ref, raw: RawPR): PR {
 			return name ? [name] : [];
 		}),
 		bot: botComment ? parseBotReview(botComment.body) : null,
+		queue: queuedLane(raw.comments.nodes.map(c => ({author: c.author?.login ?? null, body: c.body}))),
 	};
 }
 
@@ -159,4 +170,33 @@ export async function fetchAll(branch: Branch | null): Promise<{mine: PR[]; curr
 	const prs = await fetchDetails(refs);
 
 	return {mine: prs.slice(0, mineRefs.length), current: branch ? findBranchPr(prs, branch) : null};
+}
+
+const MERGED_LOOKUP_CONCURRENCY = 8;
+
+/** The merged PR for a checked out branch, or null when the branch is the default one or has no merged PR. */
+async function findMergedPR(branch: Branch): Promise<Ref | null> {
+	const data = await graphql<{repository: {defaultBranchRef: {name: string} | null; pullRequests: {nodes: {number: number}[]}}}>(`{
+		repository(owner: ${str(branch.owner)}, name: ${str(branch.name)}) {
+			defaultBranchRef { name }
+			pullRequests(headRefName: ${str(branch.branch)}, states: MERGED, last: 1) { nodes { number } }
+		}
+	}`);
+	if (data.repository.defaultBranchRef?.name === branch.branch) return null;
+	const number = data.repository.pullRequests.nodes[0]?.number;
+	return number ? {owner: branch.owner, name: branch.name, number} : null;
+}
+
+/** Merged PRs for the given checked out branches, skipping any that can't be looked up. */
+export async function fetchMerged(branches: Branch[]): Promise<PR[]> {
+	const refs: Ref[] = [];
+	let next = 0;
+	const worker = async () => {
+		while (next < branches.length) {
+			const ref = await findMergedPR(branches[next++]).catch(() => null);
+			if (ref && !refs.some(r => sameRef(r, ref))) refs.push(ref);
+		}
+	};
+	await Promise.all(Array.from({length: MERGED_LOOKUP_CONCURRENCY}, worker));
+	return fetchDetails(refs);
 }

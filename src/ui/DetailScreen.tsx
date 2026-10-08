@@ -243,6 +243,7 @@ export function DetailScreen({pr, checkout, claude, selectedCheck}: Props) {
 				<Box justifyContent="space-between">
 					<Text color={meta.color} bold>
 						{meta.icon} {meta.label}
+						{pr.queue && <Text bold={false}> in {pr.queue}</Text>}
 					</Text>
 					<Text dimColor>
 						{pr.repo}#{pr.number}

@@ -30,10 +30,7 @@ export function age(ms: number) {
  */
 export function statusLine(s: StatusInput): Span[] {
 	const updated = s.fetchedAt ? `updated ${age(s.now - s.fetchedAt)}` : null;
-	if (s.mode.kind === 'confirm') {
-		const {repo, number} = s.mode.pr;
-		return [{text: `Queue ${repo}#${number} via GitQueue? (y/n)`, color: 'yellow', bold: true}];
-	}
+	if (s.mode.kind === 'confirm') return [{text: s.mode.prompt, color: 'yellow', bold: true}];
 	if (s.mode.kind === 'leap') return [{text: 'leap: type a label · esc cancels', color: 'cyan'}];
 	if (s.mode.kind === 'search') {
 		const spans: Span[] = [{text: `/${s.query}`, color: 'cyan'}, {text: ' ', inverse: true}];

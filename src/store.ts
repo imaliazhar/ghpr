@@ -39,7 +39,7 @@ export const lastTab = {
 	save: (tab: string | null) => stateFile.save({...stateFile.load(), tab}),
 };
 
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 4;
 const cacheFile = jsonFile<{version: number; savedAt: number; mine: PR[]} | null>(join(CACHE_DIR, 'prs.json'), null);
 
 export const prCache = {

@@ -4,7 +4,9 @@ import {openUrl, queueForMerge, setLabel} from '../actions.js';
 import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sendToClaude, sessionName} from '../tmux.js';
 import {currentBranch} from '../git.js';
 import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
-import type {PR} from '../github.js';
+import {cleanUpWorkspace} from '../cleanup.js';
+import {isBranchOf} from '../git.js';
+import {fetchMerged, type PR} from '../github.js';
 import {handleKey, helpItems, initialInput, type Effect, type InputContext} from '../input.js';
 import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
 import {startView} from '../prData.js';
@@ -86,15 +88,28 @@ export function App({all}: {all: boolean}) {
 
 	useEffect(scan, [scan]);
 
-	const findPr = (url: string) => mine.find(p => p.url === url) ?? (current?.url === url ? current : undefined);
+	const [merged, setMerged] = useState<PR[]>([]);
+	const leftover = useMemo(() => {
+		if (!fresh || !checkouts) return [];
+		const open = current ? [...mine, current] : mine;
+		return checkouts.filter(c => !open.some(pr => isBranchOf(pr, c)));
+	}, [fresh, checkouts, mine, current]);
+	const leftoverKey = leftover.map(c => `${c.dir}@${c.branch}`).join('\n');
+	useEffect(() => {
+		if (leftover.length) fetchMerged(leftover).then(setMerged, () => {});
+		else setMerged([]);
+	}, [leftoverKey]);
+	const listed = useMemo(() => [...mine, ...merged.filter(m => !mine.some(p => p.url === m.url))], [mine, merged]);
 
-	const tabs = useMemo(() => buildTabs(mine, archived), [mine, archived]);
+	const findPr = (url: string) => listed.find(p => p.url === url) ?? (current?.url === url ? current : undefined);
+
+	const tabs = useMemo(() => buildTabs(listed, archived), [listed, archived]);
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
 	const listOptions = useMemo(() => ({tab: activeTab, archived, showArchived}), [activeTab, archived, showArchived]);
-	const view = useMemo(() => listView(mine, listOptions, cursor), [mine, listOptions, cursor]);
+	const view = useMemo(() => listView(listed, listOptions, cursor), [listed, listOptions, cursor]);
 	const matches = useMemo(() => searchMatches(view, input.query).matches, [view, input.query]);
 
-	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...mine, current] : mine, checkouts ?? []), [mine, current, checkouts]);
+	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...listed, current] : listed, checkouts ?? []), [listed, current, checkouts]);
 	const claudeStates = useClaudeStates();
 	const claudeByPr = useMemo(
 		() => new Map([...checkoutMap].flatMap(([url, c]) => (claudeStates.has(c.dir) ? [[url, claudeStates.get(c.dir)!] as const] : []))),
@@ -102,7 +117,7 @@ export function App({all}: {all: boolean}) {
 	);
 
 	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
-	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? mine.find(p => p.url === view.cursor) : undefined;
+	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? listed.find(p => p.url === view.cursor) : undefined;
 
 	useEffect(() => {
 		if (screen.kind === 'detail' && !loading && !detailPr) setScreen({kind: 'list'});
@@ -127,14 +142,28 @@ export function App({all}: {all: boolean}) {
 		flash(`Queueing ${pr.repo}#${pr.number}…`, 'yellow');
 		try {
 			await queueForMerge(pr);
+			patch(pr.url, p => ({...p, queue: 'normal'}));
 			flash(`Queued ${pr.repo}#${pr.number} via GitQueue`);
 		} catch (e) {
 			flash(errorText(e), 'red');
 		}
 	};
 
+	const cleanUp = async (pr: PR, checkout: Checkout) => {
+		flash(`Cleaning up ${sessionName(checkout.dir)}…`, 'yellow');
+		try {
+			const done = await cleanUpWorkspace(checkout, pr.headSha);
+			setMerged(m => m.filter(p => p.url !== pr.url));
+			if (screen.kind === 'detail') setScreen({kind: 'list'});
+			flash(`Cleaned up: ${done.join(', ')}`);
+			scan();
+		} catch (e) {
+			flash(errorText(e), 'red');
+		}
+	};
+
 	const toggleArchive = (pr: PR) => {
-		const next = toggleArchived(mine, listOptions, pr.url);
+		const next = toggleArchived(listed, listOptions, pr.url);
 		updateArchived(next.archived);
 		if (next.cursor !== undefined) setCursor(next.cursor);
 		flash(next.archived.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
@@ -164,6 +193,8 @@ export function App({all}: {all: boolean}) {
 				return setCursor(command.id);
 			case 'queue':
 				return void queue(command.pr);
+			case 'cleanup':
+				return void cleanUp(command.pr, command.checkout);
 			case 'flash':
 				return flash(command.text, command.color);
 			case 'move': {
@@ -238,7 +269,7 @@ export function App({all}: {all: boolean}) {
 					claude={claudeByPr.get(detailPr.url)}
 					selectedCheck={checkIndex}
 				/>
-			) : !loading && mine.length === 0 ? (
+			) : !loading && listed.length === 0 ? (
 				<Text dimColor>No open PRs 🎉</Text>
 			) : (
 				<ListScreen

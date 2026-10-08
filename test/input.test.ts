@@ -55,7 +55,7 @@ describe('handleKey', () => {
 	test('queue asks first and only y confirms', () => {
 		const ctx = context(list[2].url);
 		const asked = press(['m'], initialInput, ctx);
-		assert.deepEqual(asked.state.mode, {kind: 'confirm', pr: list[2]});
+		assert.deepEqual(asked.state.mode, {kind: 'confirm', prompt: `Queue acme/app#${list[2].number} via GitQueue? (y/n)`, effect: {type: 'queue', pr: list[2]}});
 		assert.deepEqual(press(['y'], asked.state, ctx).effects, [{type: 'queue', pr: list[2]}]);
 		assert.deepEqual(press(['n'], asked.state, ctx), {state: initialInput, effects: [{type: 'flash', text: 'Cancelled', color: 'gray'}]});
 	});
@@ -98,6 +98,16 @@ describe('handleKey', () => {
 		const keys = (state: InputState) => helpItems(state, context()).map(i => i.key);
 		assert.ok(!keys(initialInput).includes('n/N'));
 		assert.ok(keys({mode: {kind: 'normal'}, query: 'x'}).includes('n/N'));
+	});
+
+	test('cleaning up a merged workspace asks first', () => {
+		const merged = pr({merged: true, headRef: 'feat/x'});
+		const checkout = {owner: 'acme', name: 'app', branch: 'feat/x', dir: '/p/app-x'};
+		const ctx = {...context(), keys: {...context().keys, pr: merged, checkout}};
+		const asked = press(['X'], initialInput, ctx);
+		assert.equal(asked.state.mode.kind === 'confirm' && asked.state.mode.prompt, 'Clean up app-x? Closes its tmux session and deletes its branch (y/n)');
+		assert.deepEqual(press(['y'], asked.state, ctx).effects, [{type: 'cleanup', pr: merged, checkout}]);
+		assert.deepEqual(press(['X'], initialInput, context()).effects, [{type: 'flash', text: 'Only merged PRs can be cleaned up', color: 'gray'}]);
 	});
 
 	test('c writes a message for claude and enter sends it', () => {

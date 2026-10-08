@@ -34,18 +34,30 @@ PRs are grouped by status, most actionable first:
 
 | Status | Meaning |
 |---|---|
+| ⇡ queued to merge | GitQueue's latest comment says the PR is queued, and it hasn't posted a removal since |
 | ✔ ready to merge | Required checks pass and the PR is approved |
 | ✗ checks failing | A required check failed |
 | ⊘ bot blocking | The review bot is requesting changes |
 | ● checks running | Required checks are still running |
 | ◎ in bot review | `tunnel-review-vision` is on, so checks are paused |
 | ◌ needs approval | Checks pass, but a human approval is missing |
+| ✓ merged · workspace left | The PR is merged, but its branch is still checked out under `~/Projects` |
 
 Only required checks count. Archived PRs sit collapsed at the bottom.
 
 ## Local checkouts
 
 ghpr looks through the git repos directly under `~/Projects` in the background, and marks PRs whose branch is checked out in one with `⌂`. Inside tmux, `o` switches to that checkout's session, named after its folder with `.` replaced by `_`. If the session doesn't exist, ghpr creates it in the folder with `$EDITOR` in window 1 and `claude` in window 2. It focuses window 2 whenever the session has one. In [tmux popup mode](#tmux-popup), `o` switches the client the popup was opened from, then hides the popup.
+
+## Cleaning up merged workspaces
+
+For every checkout under `~/Projects` whose branch has no open PR, ghpr looks for a merged PR on that branch, and lists any it finds under **merged · workspace left**. `X` cleans one up after you confirm with `y`:
+
+1. It closes the checkout's tmux session, unless ghpr is running in it.
+2. A worktree is removed. A clone is kept and switched back to its default branch, then pulled.
+3. The branch is deleted, and the session's claude state is forgotten.
+
+It refuses before changing anything when the checkout has uncommitted changes, or when the branch has commits that aren't in the merged PR.
 
 ## Claude sessions
 
@@ -91,6 +103,7 @@ Claude Code runs no hook when you interrupt it with `esc`, so the session shows 
 | `O` | Open the PR in the browser |
 | `o` | Switch to the tmux session for the PR's local checkout, creating it if needed |
 | `c` | Write a message for claude in that session's window named `claude`; `enter` sends, `esc` cancels |
+| `X` | Clean up a merged PR's local workspace (see [Cleaning up merged workspaces](#cleaning-up-merged-workspaces)) |
 | `B` | Ask that claude whether the review bot's blocking review is valid, when the bot is requesting changes |
 | `ctrl+g` | Open the PR's repo in GitQueue (`app.gitqueue.com/install/<owner>/<repo>`) |
 | `m` | Queue via GitQueue (`/gitqueue add normal`), only when ready |
