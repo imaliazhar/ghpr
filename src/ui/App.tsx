@@ -12,7 +12,7 @@ import {archivedPrs, lastTab} from '../store.js';
 import {searchMatches} from '../search.js';
 import {statusLine, type Message} from '../statusLine.js';
 import {failingChecks, hasLabel} from '../status.js';
-import {KeyHelp, Spinner, useTerminalSize} from './common.js';
+import {KeyHelp, Spinner, useClaudeStates, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
 import {ListScreen} from './ListScreen.js';
 import {buildTabs} from './TabBar.js';
@@ -95,6 +95,11 @@ export function App({all}: {all: boolean}) {
 	const matches = useMemo(() => searchMatches(view, input.query).matches, [view, input.query]);
 
 	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...mine, current] : mine, checkouts ?? []), [mine, current, checkouts]);
+	const claudeStates = useClaudeStates();
+	const claudeByPr = useMemo(
+		() => new Map([...checkoutMap].flatMap(([url, c]) => (claudeStates.has(c.dir) ? [[url, claudeStates.get(c.dir)!] as const] : []))),
+		[checkoutMap, claudeStates],
+	);
 
 	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
 	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? mine.find(p => p.url === view.cursor) : undefined;
@@ -230,6 +235,7 @@ export function App({all}: {all: boolean}) {
 					key={detailPr.url}
 					pr={detailPr}
 					checkout={checkoutMap.get(detailPr.url)}
+					claude={claudeByPr.get(detailPr.url)}
 					selectedCheck={checkIndex}
 				/>
 			) : !loading && mine.length === 0 ? (
@@ -242,6 +248,7 @@ export function App({all}: {all: boolean}) {
 					matches={matches}
 					leap={input.mode.kind === 'leap' ? input.mode.leap : null}
 					checkouts={checkoutMap}
+					claude={claudeByPr}
 					showArchived={showArchived}
 					onHeight={setListHeight}
 				/>

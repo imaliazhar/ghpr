@@ -14,7 +14,7 @@ A terminal dashboard for your open GitHub pull requests. It shows what each PR i
 
 ```sh
 npm install
-npm run install:local   # bundles the app into a single file at ~/.local/bin/ghpr
+npm run install:local   # bundles the app into ~/.local/bin/ghpr, next to the ghpr-claude-state hook script
 ```
 
 Rerun `npm run install:local` after pulling changes. For development, `npm start` runs from source.
@@ -46,6 +46,34 @@ Only required checks count. Archived PRs sit collapsed at the bottom.
 ## Local checkouts
 
 ghpr looks through the git repos directly under `~/Projects` in the background, and marks PRs whose branch is checked out in one with `⌂`. Inside tmux, `o` switches to that checkout's session, named after its folder with `.` replaced by `_`. If the session doesn't exist, ghpr creates it in the folder with `$EDITOR` in window 1 and `claude` in window 2. It focuses window 2 whenever the session has one. In [tmux popup mode](#tmux-popup), `o` switches the client the popup was opened from, then hides the popup.
+
+## Claude sessions
+
+With Claude Code hooks set up, the `⌂` of a PR whose checkout has a Claude Code session shows what that session is doing, and the detail page spells it out:
+
+| Marker | Meaning |
+| --- | --- |
+| yellow spinner | working |
+| `●` magenta | waiting for you |
+| `!` red | needs permission or an answer |
+
+The hooks run `ghpr-claude-state`, which records each session's state in `~/.cache/ghpr/claude`, keyed by its project folder. Add them to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting", "async": true}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state working", "async": true}]}],
+    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state working", "async": true}]}],
+    "Notification": [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state permission", "async": true}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting", "async": true}]}],
+    "StopFailure": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting", "async": true}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state ended"}]}]
+  }
+}
+```
+
+Claude Code runs no hook when you interrupt it with `esc`, so the session shows as working until its next prompt.
 
 ## Keys
 
@@ -87,5 +115,6 @@ If tmux can't detach the session, ghpr quits.
 ## Local files
 
 - `~/.cache/ghpr/prs.json`: results from the last fetch
+- `~/.cache/ghpr/claude/`: the state of each Claude Code session, written by `ghpr-claude-state`
 - `~/.config/ghpr/archived.json`: archived PRs
 - `~/.config/ghpr/state.json`: last selected repo tab

@@ -11,7 +11,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p .",
-    "install:local": "npm run build && mkdir -p ~/.local/bin && cp dist/ghpr.mjs ~/.local/bin/ghpr && chmod +x ~/.local/bin/ghpr && echo 'Installed ~/.local/bin/ghpr'"
+    "install:local": "npm run build && mkdir -p ~/.local/bin && cp dist/ghpr.mjs ~/.local/bin/ghpr && cp bin/ghpr-claude-state ~/.local/bin/ && chmod +x ~/.local/bin/ghpr ~/.local/bin/ghpr-claude-state && echo 'Installed ~/.local/bin/ghpr and ghpr-claude-state'"
   },
   "dependencies": {
     "fzf": "^0.5.2",

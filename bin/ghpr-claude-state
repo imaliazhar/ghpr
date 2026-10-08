@@ -1,0 +1,11 @@
+#!/bin/sh
+# Records what the Claude Code session in $CLAUDE_PROJECT_DIR is doing, for ghpr to show next to its PR.
+# Usage: ghpr-claude-state working|waiting|permission|ended (run from Claude Code hooks).
+cat >/dev/null
+dir="$HOME/.cache/ghpr/claude"
+file="$dir/$(printf '%s' "${CLAUDE_PROJECT_DIR:-$PWD}" | tr / %)"
+if [ "$1" = ended ]; then
+	rm -f "$file"
+else
+	mkdir -p "$dir" && printf '%s\n' "$1" >"$file"
+fi

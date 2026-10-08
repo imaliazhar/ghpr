@@ -3,9 +3,10 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, type DOMElement} from 'ink';
 import {shownItems, type BotItem} from '../botReview.js';
 import type {Checkout} from '../checkouts.js';
+import type {ClaudeState} from '../claudeState.js';
 import type {Check, PR} from '../github.js';
 import {STATUS_META, TUNNEL_LABEL, failingChecks, hasLabel, statusOf} from '../status.js';
-import {Labels, useTerminalSize} from './common.js';
+import {CLAUDE_STATE_LABEL, ClaudeMarker, Labels, useTerminalSize} from './common.js';
 
 const SEVERITY: Record<BotItem['severity'], {label: string; color: string}> = {
 	critical: {label: 'critical', color: 'red'},
@@ -21,6 +22,7 @@ const TWO_COLUMN_MIN = 110;
 type Props = {
 	pr: PR;
 	checkout: Checkout | undefined;
+	claude: ClaudeState | undefined;
 	selectedCheck: number;
 };
 
@@ -228,7 +230,7 @@ function ReviewsPanel({pr}: {pr: PR}) {
 	);
 }
 
-export function DetailScreen({pr, checkout, selectedCheck}: Props) {
+export function DetailScreen({pr, checkout, claude, selectedCheck}: Props) {
 	const {columns} = useTerminalSize();
 	const meta = STATUS_META[statusOf(pr)];
 	const twoColumns = columns >= TWO_COLUMN_MIN;
@@ -254,6 +256,11 @@ export function DetailScreen({pr, checkout, selectedCheck}: Props) {
 					{checkout && (
 						<Text color="cyan" dimColor wrap="truncate">
 							⌂ {checkout.dir.replace(homedir(), '~')}
+						</Text>
+					)}
+					{claude && (
+						<Text wrap="truncate">
+							<ClaudeMarker state={claude} /> <Text dimColor>{CLAUDE_STATE_LABEL[claude]}</Text>
 						</Text>
 					)}
 					{twoColumns && <Labels pr={pr} />}

@@ -1,10 +1,12 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, type DOMElement} from 'ink';
 import type {Checkout} from '../checkouts.js';
+import type {ClaudeState} from '../claudeState.js';
 import type {Leap} from '../leap.js';
 import {rowId, scrollStart, type ListView} from '../listModel.js';
 import {highlight, type TitleMatches} from '../search.js';
 import {STATUS_META, statusOf} from '../status.js';
+import {ClaudeMarker} from './common.js';
 import {TabBar, type Tab} from './TabBar.js';
 
 type Props = {
@@ -14,12 +16,14 @@ type Props = {
 	matches: TitleMatches;
 	leap: Leap | null;
 	checkouts: Map<string, Checkout>;
+	/** The state of each PR's claude session, by PR url. */
+	claude: Map<string, ClaudeState>;
 	showArchived: boolean;
 	/** Reports how many rows fit, for half-page motions. */
 	onHeight: (rows: number) => void;
 };
 
-export function ListScreen({tabs, tab, view, matches, leap, checkouts, showArchived, onHeight}: Props) {
+export function ListScreen({tabs, tab, view, matches, leap, checkouts, claude, showArchived, onHeight}: Props) {
 	const listRef = useRef<DOMElement>(null);
 	const [listHeight, setListHeight] = useState(10);
 	useEffect(() => {
@@ -65,9 +69,8 @@ export function ListScreen({tabs, tab, view, matches, leap, checkouts, showArchi
 					const label = leap?.labels.get(row.pr.url);
 					return (
 						<Box key={key}>
-							<Text color="cyan">{isSel ? '❯ ' : '  '}</Text>
 							{label?.startsWith(leap!.typed) ? (
-								<Box width={4} flexShrink={0}>
+								<Box width={row.archived ? 6 : 4} flexShrink={0}>
 									<Text bold>
 										<Text color="gray">{leap!.typed}</Text>
 										<Text color="black" backgroundColor="#d7ffaf">
@@ -77,15 +80,22 @@ export function ListScreen({tabs, tab, view, matches, leap, checkouts, showArchi
 								</Box>
 							) : (
 								<>
+									<Text color="cyan">{isSel ? '❯ ' : '  '}</Text>
+									{row.archived && (
+										<Box width={2} flexShrink={0}>
+											<Text color={meta.color} dimColor>
+												{meta.icon}
+											</Text>
+										</Box>
+									)}
 									<Box width={2} flexShrink={0}>
-										<Text color={meta.color} dimColor={row.archived}>
-											{meta.icon}
-										</Text>
-									</Box>
-									<Box width={2} flexShrink={0}>
-										<Text color="cyan" dimColor>
-											{checkouts.has(row.pr.url) ? '⌂' : ' '}
-										</Text>
+										{claude.has(row.pr.url) ? (
+											<ClaudeMarker state={claude.get(row.pr.url)!} />
+										) : (
+											<Text color="cyan" dimColor>
+												{checkouts.has(row.pr.url) ? '⌂' : ' '}
+											</Text>
+										)}
 									</Box>
 								</>
 							)}

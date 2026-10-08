@@ -1,5 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {Box, Text, useStdout} from 'ink';
+import {readClaudeStates, type ClaudeState} from '../claudeState.js';
 import type {PR} from '../github.js';
 import type {KeyItem} from '../keymap.js';
 
@@ -80,4 +81,41 @@ export function Spinner() {
 		return () => clearInterval(id);
 	}, []);
 	return <Text>{SPINNER_FRAMES[frame]}</Text>;
+}
+
+export const CLAUDE_STATE_LABEL: Record<ClaudeState, string> = {
+	working: 'claude working',
+	waiting: 'claude waiting for you',
+	permission: 'claude needs permission',
+};
+
+/** One cell showing what the PR's claude session is doing. */
+export function ClaudeMarker({state}: {state: ClaudeState}) {
+	if (state === 'working')
+		return (
+			<Text color="yellow">
+				<Spinner />
+			</Text>
+		);
+	return state === 'waiting' ? <Text color="magenta">●</Text> : <Text color="red" bold>!</Text>;
+}
+
+/** Claude Code session states by project folder, reread every `intervalMs`. */
+export function useClaudeStates(intervalMs = 2000) {
+	const [states, setStates] = useState(new Map<string, ClaudeState>());
+	useEffect(() => {
+		let last = '';
+		const read = () =>
+			readClaudeStates().then(next => {
+				const key = JSON.stringify([...next]);
+				if (key !== last) {
+					last = key;
+					setStates(next);
+				}
+			});
+		read();
+		const id = setInterval(read, intervalMs);
+		return () => clearInterval(id);
+	}, [intervalMs]);
+	return states;
 }
