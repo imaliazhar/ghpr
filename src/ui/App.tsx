@@ -6,34 +6,15 @@ import {loadCache, saveCache} from '../cache.js';
 import {currentBranch, type Branch} from '../git.js';
 import {loadLastTab, saveLastTab} from '../state.js';
 import {fetchAll, type PR} from '../github.js';
+import {listView, toggleArchived} from '../listModel.js';
 import {IN_REVIEW_LABEL, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
 import {Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
-import {ListScreen, buildRows, rowId, selectableIds, type Row} from './ListScreen.js';
+import {ListScreen} from './ListScreen.js';
 import {buildTabs} from './TabBar.js';
 
 type Screen = {kind: 'list'} | {kind: 'detail'; url: string};
 type Message = {text: string; color: string};
-
-function sectionNeighbour(rows: Row[], index: number) {
-	const next = rows[index + 1];
-	if (next?.kind === 'pr') return next.pr.url;
-	const previous = rows[index - 1];
-	return previous?.kind === 'pr' ? previous.pr.url : null;
-}
-
-/** Next PR in the same section, else the toggled PR if still listed, else the nearest remaining row. */
-function cursorAfterArchiveToggle(rows: Row[], nextRows: Row[], id: string) {
-	const index = rows.findIndex(r => rowId(r) === id);
-	if (index < 0) return undefined;
-	const neighbour = sectionNeighbour(rows, index);
-	if (neighbour) return neighbour;
-	const nextIds = selectableIds(nextRows);
-	if (nextIds.includes(id)) return id;
-	const ids = selectableIds(rows);
-	const at = ids.indexOf(id);
-	return [...ids.slice(at + 1), ...ids.slice(0, at).reverse()].find(i => nextIds.includes(i)) ?? null;
-}
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -131,13 +112,11 @@ export function App({all}: {all: boolean}) {
 
 	const tabs = useMemo(() => buildTabs(mine, archived), [mine, archived]);
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
-	const tabPrs = useMemo(() => (activeTab ? mine.filter(p => p.repo === activeTab) : mine), [mine, activeTab]);
-	const rows = useMemo(() => buildRows(tabPrs, archived, showArchived), [tabPrs, archived, showArchived]);
-	const ids = selectableIds(rows);
-	const activeCursor = cursor && ids.includes(cursor) ? cursor : (ids[0] ?? null);
+	const listOptions = useMemo(() => ({tab: activeTab, archived, showArchived}), [activeTab, archived, showArchived]);
+	const view = useMemo(() => listView(mine, listOptions, cursor), [mine, listOptions, cursor]);
 
 	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
-	const focused = screen.kind === 'detail' ? detailPr : activeCursor ? mine.find(p => p.url === activeCursor) : undefined;
+	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? mine.find(p => p.url === view.cursor) : undefined;
 
 	useEffect(() => {
 		if (screen.kind === 'detail' && !loading && !detailPr) setScreen({kind: 'list'});
@@ -174,13 +153,10 @@ export function App({all}: {all: boolean}) {
 	};
 
 	const toggleArchive = (pr: PR) => {
-		const next = new Set(archived);
-		if (next.has(pr.url)) next.delete(pr.url);
-		else next.add(pr.url);
-		updateArchived(next);
-		const nextCursor = cursorAfterArchiveToggle(rows, buildRows(tabPrs, next, showArchived), pr.url);
-		if (nextCursor !== undefined) setCursor(nextCursor);
-		flash(next.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
+		const next = toggleArchived(mine, listOptions, pr.url);
+		updateArchived(next.archived);
+		if (next.cursor !== undefined) setCursor(next.cursor);
+		flash(next.archived.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
 	};
 
 	const canQueue = (pr: PR | undefined) => !!pr && fresh && statusOf(pr) === 'ready';
@@ -246,8 +222,7 @@ export function App({all}: {all: boolean}) {
 						setTab(repo);
 						saveLastTab(repo);
 					}}
-					rows={rows}
-					cursor={activeCursor}
+					view={view}
 					focused={focused}
 					canQueue={canQueue(focused)}
 					active={!confirm}

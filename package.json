@@ -9,6 +9,8 @@
   "scripts": {
     "start": "tsx src/cli.tsx",
     "build": "node scripts/build.mjs",
+    "test": "node --import tsx --test test/*.test.ts",
+    "typecheck": "tsc -p .",
     "install:local": "npm run build && mkdir -p ~/.local/bin && cp dist/ghpr.mjs ~/.local/bin/ghpr && chmod +x ~/.local/bin/ghpr && echo 'Installed ~/.local/bin/ghpr'"
   },
   "dependencies": {
