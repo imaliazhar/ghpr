@@ -1,12 +1,10 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {hideTmuxPopup, inTmuxPopup, openUrl, queueForMerge, setLabel} from '../actions.js';
-import {loadArchived, saveArchived} from '../archive.js';
-import {loadCache, saveCache} from '../cache.js';
 import {currentBranch, type Branch} from '../git.js';
-import {loadLastTab, saveLastTab} from '../state.js';
 import {fetchAll, type PR} from '../github.js';
 import {listView, toggleArchived} from '../listModel.js';
+import {archivedPrs, lastTab, prCache} from '../store.js';
 import {IN_REVIEW_LABEL, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
 import {Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
@@ -29,7 +27,7 @@ function age(ms: number) {
 export function App({all}: {all: boolean}) {
 	const {exit} = useApp();
 	const branch = useMemo(() => (all ? Promise.resolve(null) : currentBranch()), [all]);
-	const cache = useMemo(loadCache, []);
+	const cache = useMemo(prCache.load, []);
 	const startViewApplied = useRef(false);
 	const hasInteracted = useRef(false);
 	const {columns, rows: terminalRows} = useTerminalSize();
@@ -37,9 +35,9 @@ export function App({all}: {all: boolean}) {
 	const [mine, setMine] = useState<PR[]>(() => cache?.mine ?? []);
 	const [fresh, setFresh] = useState(false);
 	const [current, setCurrent] = useState<PR | null>(null);
-	const [archived, setArchived] = useState(loadArchived);
+	const [archived, setArchived] = useState(archivedPrs.load);
 	const [showArchived, setShowArchived] = useState(false);
-	const [tab, setTab] = useState<string | null>(loadLastTab);
+	const [tab, setTab] = useState<string | null>(lastTab.load);
 	const [screen, setScreen] = useState<Screen>({kind: 'list'});
 	const [cursor, setCursor] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -57,7 +55,7 @@ export function App({all}: {all: boolean}) {
 	}, [message]);
 
 	const updateArchived = (next: Set<string>) => {
-		saveArchived(next);
+		archivedPrs.save(next);
 		setArchived(next);
 	};
 
@@ -86,13 +84,13 @@ export function App({all}: {all: boolean}) {
 			setCurrent(result.current);
 			setFresh(true);
 			setError(null);
-			saveCache(result.mine);
+			prCache.save(result.mine);
 
 			const openUrls = new Set(result.mine.map(p => p.url));
 			setArchived(prev => {
 				const kept = new Set([...prev].filter(url => openUrls.has(url)));
 				if (kept.size === prev.size) return prev;
-				saveArchived(kept);
+				archivedPrs.save(kept);
 				return kept;
 			});
 
@@ -220,7 +218,7 @@ export function App({all}: {all: boolean}) {
 					tab={activeTab}
 					onTab={repo => {
 						setTab(repo);
-						saveLastTab(repo);
+						lastTab.save(repo);
 					}}
 					view={view}
 					focused={focused}
