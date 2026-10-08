@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {openSession, sessionName, type TmuxEnv} from '../src/tmux.js';
+import {openSession, sendToClaude, sessionName, type TmuxEnv} from '../src/tmux.js';
 
 /** A tmux that records commands; `sessions` exist with `windows`, `clients` are `activity session name` lines. */
 function fakeTmux(options: Partial<Omit<TmuxEnv, 'run'> & {sessions: string[]; windows: string; clients: string}> = {}) {
@@ -66,4 +66,31 @@ test('from the popup, switches the most recent outer client and hides the popup'
 test('fails when the popup has no outer client to switch', async () => {
 	const {env} = fakeTmux({sessions: ['app'], clients: '300 _ghpr /dev/ttys003', popupSession: '_ghpr'});
 	await assert.rejects(openSession('/p/app', env), /No tmux client/);
+});
+
+test('pastes a message into the window named claude and submits it', async () => {
+	const {env, calls} = fakeTmux({sessions: ['app'], windows: '1 nvim\n3 claude\n'});
+	await sendToClaude('/p/app', 'line one\nline two', env);
+	assert.deepEqual(calls, [
+		'list-windows -t =app -F #{window_index} #{window_name}',
+		'set-buffer -b ghpr -- line one\nline two',
+		'paste-buffer -d -p -b ghpr -t =app:3',
+		'send-keys -t =app:3 Enter',
+	]);
+});
+
+test('sends nothing unless a window is named exactly claude', async () => {
+	const {env, calls} = fakeTmux({sessions: ['app'], windows: '1 nvim\n2 2.1.294\n3 claude-old\n'});
+	await assert.rejects(sendToClaude('/p/app', 'hi', env), /No "claude" window in app/);
+	assert.equal(calls.length, 1);
+});
+
+test('sends nothing when the session is missing', async () => {
+	const {env, calls} = fakeTmux();
+	env.run = async args => {
+		calls.push(args.join(' '));
+		throw new Error("can't find session");
+	};
+	await assert.rejects(sendToClaude('/p/app', 'hi', env), /No tmux session app/);
+	assert.equal(calls.length, 1);
 });

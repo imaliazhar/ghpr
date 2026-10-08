@@ -1,4 +1,5 @@
 import type {Mode} from './input.js';
+import {sessionName} from './tmux.js';
 
 export type Message = {text: string; color: string};
 
@@ -24,8 +25,8 @@ export function age(ms: number) {
 }
 
 /**
- * The status line, highest priority first: a pending confirmation, leap, search typing, a flashed
- * message, loading, a failed refresh, and otherwise when data was last fetched.
+ * The status line, highest priority first: a pending confirmation, leap, search typing, a message being
+ * written for claude, a flashed message, loading, a failed refresh, and otherwise when data was last fetched.
  */
 export function statusLine(s: StatusInput): Span[] {
 	const updated = s.fetchedAt ? `updated ${age(s.now - s.fetchedAt)}` : null;
@@ -38,6 +39,14 @@ export function statusLine(s: StatusInput): Span[] {
 		const spans: Span[] = [{text: `/${s.query}`, color: 'cyan'}, {text: ' ', inverse: true}];
 		if (s.query) spans.push(s.matchCount ? {text: `  ${s.matchCount} ${s.matchCount === 1 ? 'match' : 'matches'}`, dim: true} : {text: '  no matches', color: 'red'});
 		return spans;
+	}
+	if (s.mode.kind === 'compose') {
+		return [
+			{text: `claude@${sessionName(s.mode.checkout.dir)} ❯ `, color: 'magenta'},
+			{text: s.mode.text},
+			{text: ' ', inverse: true},
+			{text: '  enter sends · esc cancels', dim: true},
+		];
 	}
 	if (s.message) return [{text: s.message.text, color: s.message.color}];
 	if (s.loading) return [{spinner: true, color: 'yellow'}, {text: updated ? ` refreshing · ${updated}` : ' loading', color: 'yellow'}];

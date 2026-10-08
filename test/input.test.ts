@@ -99,4 +99,19 @@ describe('handleKey', () => {
 		assert.ok(!keys(initialInput).includes('n/N'));
 		assert.ok(keys({mode: {kind: 'normal'}, query: 'x'}).includes('n/N'));
 	});
+
+	test('c writes a message for claude and enter sends it', () => {
+		const checkout = {owner: 'acme', name: 'app', branch: 'b', dir: '/p/app'};
+		const ctx = {...context(), keys: {...context().keys, checkout}};
+		const typed = press(['c', 'h', 'x', key('', {backspace: true}), 'i there'], initialInput, ctx);
+		assert.deepEqual(typed.state.mode, {kind: 'compose', checkout, text: 'hi there'});
+		assert.deepEqual(press(['k'], typed.state, ctx).effects, [], 'keys are typed, not run');
+		assert.deepEqual(press([key('', {return: true})], typed.state, ctx), {
+			state: initialInput,
+			effects: [{type: 'sendClaude', checkout, text: 'hi there'}],
+		});
+		assert.deepEqual(press(['!\r'], typed.state, ctx).effects, [{type: 'sendClaude', checkout, text: 'hi there!'}]);
+		assert.deepEqual(press([esc], typed.state, ctx), {state: initialInput, effects: []});
+		assert.deepEqual(press(['c', key('', {return: true})], initialInput, ctx), {state: initialInput, effects: []});
+	});
 });

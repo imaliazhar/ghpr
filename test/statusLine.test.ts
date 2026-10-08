@@ -42,4 +42,9 @@ describe('statusLine', () => {
 		assert.equal(text({mode: {kind: 'search', origin: null}, query: 'zz'}), '/zz   no matches');
 		assert.equal(text({mode: {kind: 'search', origin: null}}), '/ ');
 	});
+
+	test('shows the message being written for claude', () => {
+		const checkout = {owner: 'acme', name: 'app', branch: 'b', dir: '/p/my.app'};
+		assert.equal(text({mode: {kind: 'compose', checkout, text: 'hi'}}), 'claude@my_app ❯ hi   enter sends · esc cancels');
+	});
 });

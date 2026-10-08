@@ -1,16 +1,18 @@
 import {homedir} from 'node:os';
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, type DOMElement} from 'ink';
-import type {BotItem} from '../botReview.js';
+import {shownItems, type BotItem} from '../botReview.js';
 import type {Checkout} from '../checkouts.js';
 import type {Check, PR} from '../github.js';
 import {STATUS_META, TUNNEL_LABEL, failingChecks, hasLabel, statusOf} from '../status.js';
 import {Labels, useTerminalSize} from './common.js';
 
 const SEVERITY: Record<BotItem['severity'], {label: string; color: string}> = {
-	critical: {label: '🔴 critical', color: 'red'},
-	important: {label: '🟠 important', color: 'yellow'},
-	required: {label: '🔴 required', color: 'red'},
+	critical: {label: 'critical', color: 'red'},
+	important: {label: 'important', color: 'yellow'},
+	required: {label: 'required', color: 'red'},
+	warning: {label: 'warning', color: 'yellow'},
+	win: {label: 'win', color: 'green'},
 };
 
 /** Below this width the panels stack instead of sitting side by side. */
@@ -141,36 +143,62 @@ function ChecksPanel({pr, selectedCheck, width}: {pr: PR; selectedCheck: number;
 	);
 }
 
-function BotPanel({pr}: {pr: PR}) {
-	const bot = pr.bot;
-	if (!bot) return null;
-	if (bot.outcome === 'approved') {
-		return (
-			<Panel title={<Text color="green">Review bot</Text>} color="green">
-				<Text color="green">✔ approved</Text>
-			</Panel>
-		);
-	}
-	if (bot.outcome === 'unknown') {
-		return (
-			<Panel title="Review bot">
-				<Text dimColor>reviewing…</Text>
-			</Panel>
-		);
-	}
+const BOT_TITLE: Record<NonNullable<PR['bot']>['outcome'], {text: string; color: string}> = {
+	changes: {text: 'Review bot: requesting changes', color: 'red'},
+	approved: {text: 'Review bot: ✔ approved', color: 'green'},
+	unknown: {text: 'Review bot: reviewing…', color: 'gray'},
+};
+
+function BotFinding({item}: {item: BotItem}) {
+	const severity = SEVERITY[item.severity];
 	return (
-		<Panel title={<Text color="red">Review bot: requesting changes</Text>} color="red">
-			{bot.parsed ? (
-				bot.items.map((item, i) => (
-					<Box key={i} flexDirection="column" marginTop={i ? 1 : 0}>
-						<Text color={SEVERITY[item.severity].color}>{SEVERITY[item.severity].label}</Text>
-						<Text>{item.summary}</Text>
-						{item.location && <Text dimColor>{item.location}</Text>}
-					</Box>
-				))
-			) : (
-				<Text dimColor>details unavailable</Text>
+		<Box flexDirection="column" marginBottom={1} flexShrink={0}>
+			<Text wrap="truncate">
+				<Text color={severity.color} bold>
+					{severity.label}
+				</Text>
+				{item.location && <Text color="cyan" dimColor>{'  '}{item.location}</Text>}
+			</Text>
+			<Text>{item.summary}</Text>
+			{item.detail && <Text dimColor>{item.detail}</Text>}
+			{item.code.length > 0 && (
+				<Box flexDirection="column" borderStyle="bold" borderColor="gray" borderTop={false} borderRight={false} borderBottom={false} paddingLeft={1}>
+					{item.code.map((line, i) => (
+						<Text key={i} color="gray" wrap="truncate">
+							{line || ' '}
+						</Text>
+					))}
+				</Box>
 			)}
+		</Box>
+	);
+}
+
+function BotPanel({pr, grow}: {pr: PR; grow: boolean}) {
+	const bot = pr.bot;
+	if (!bot) {
+		return (
+			<Panel title="Review bot" grow={grow}>
+				<Text dimColor>no review yet</Text>
+			</Panel>
+		);
+	}
+	const title = BOT_TITLE[bot.outcome];
+	return (
+		<Panel title={<Text color={title.color}>{title.text}</Text>} color={title.color} grow={grow}>
+			{bot.strategy && (
+				<Box flexDirection="column" marginBottom={1} flexShrink={0}>
+					<Text>
+						<Text bold>Strategy</Text>
+						{bot.strategy.score && <Text color="cyan"> {bot.strategy.score}</Text>}
+					</Text>
+					{bot.strategy.summary && <Text dimColor>{bot.strategy.summary}</Text>}
+				</Box>
+			)}
+			{shownItems(bot).map((item, i) => (
+				<BotFinding key={i} item={item} />
+			))}
+			{!bot.parsed && <Text dimColor>details unavailable</Text>}
 		</Panel>
 	);
 }
@@ -204,8 +232,8 @@ export function DetailScreen({pr, checkout, selectedCheck}: Props) {
 	const {columns} = useTerminalSize();
 	const meta = STATUS_META[statusOf(pr)];
 	const twoColumns = columns >= TWO_COLUMN_MIN;
-	const sideWidth = Math.floor(columns * 0.4);
-	const checksWidth = (twoColumns ? columns - sideWidth - 1 : columns) - 4;
+	const sideWidth = Math.floor(columns * 0.45);
+	const checksWidth = (twoColumns ? sideWidth : columns) - 4;
 
 	return (
 		<Box flexDirection="column" flexGrow={1} overflow="hidden">
@@ -234,10 +262,10 @@ export function DetailScreen({pr, checkout, selectedCheck}: Props) {
 			</Box>
 
 			<Box flexDirection={twoColumns ? 'row' : 'column'} flexGrow={1} gap={twoColumns ? 1 : 0} overflow="hidden">
-				<ChecksPanel pr={pr} selectedCheck={selectedCheck} width={checksWidth} />
-				<Box flexDirection="column" width={twoColumns ? sideWidth : undefined} flexShrink={0}>
-					<BotPanel pr={pr} />
+				<BotPanel pr={pr} grow={twoColumns} />
+				<Box flexDirection="column" width={twoColumns ? sideWidth : undefined} flexGrow={twoColumns ? 0 : 1} flexShrink={0}>
 					<ReviewsPanel pr={pr} />
+					<ChecksPanel pr={pr} selectedCheck={selectedCheck} width={checksWidth} />
 				</Box>
 			</Box>
 		</Box>

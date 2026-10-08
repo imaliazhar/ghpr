@@ -1,3 +1,4 @@
+import type {Checkout} from './checkouts.js';
 import type {PR} from './github.js';
 import {keyHelp, resolveKey, type Command, type KeyContext, type KeyItem, type KeyPress} from './keymap.js';
 import {leapKey, startLeap, type Leap} from './leap.js';
@@ -11,7 +12,9 @@ export type Mode =
 	| {kind: 'confirm'; pr: PR}
 	| {kind: 'leap'; leap: Leap}
 	/** Typing a search query; `origin` is the cursor to restore if it's cancelled. */
-	| {kind: 'search'; origin: string | null};
+	| {kind: 'search'; origin: string | null}
+	/** Writing a message for the claude session of `checkout`. */
+	| {kind: 'compose'; checkout: Checkout; text: string};
 
 /** `query` is the active search, highlighted in every mode until it's cleared. Empty when there is none. */
 export type InputState = {mode: Mode; query: string};
@@ -22,7 +25,7 @@ export type InputContext = {keys: Omit<KeyContext, 'searching'>; view: ListView;
 
 /** Side effects for the app to run. Mode changes are handled here and never reach it. */
 export type Effect =
-	| Exclude<Command, {type: 'search' | 'leap' | 'confirmQueue' | 'clearSearch' | 'cycleMatch'}>
+	| Exclude<Command, {type: 'search' | 'leap' | 'confirmQueue' | 'clearSearch' | 'cycleMatch' | 'composeClaude'}>
 	| {type: 'setCursor'; id: string | null}
 	| {type: 'queue'; pr: PR}
 	| {type: 'flash'; text: string; color: string};
@@ -61,9 +64,31 @@ export function handleKey(state: InputState, ctx: InputContext, k: InputKey): Re
 			const effects: Effect[] = step.cursor !== undefined ? [{type: 'setCursor', id: step.cursor}] : [];
 			return step.typing ? {state: {...state, query: step.query}, effects} : normal(state, effects, step.query);
 		}
+		case 'compose': {
+			const step = typeMessage(mode.text, k);
+			if (step === 'cancel') return normal(state);
+			if ('send' in step) return normal(state, [{type: 'sendClaude', checkout: mode.checkout, text: step.send}]);
+			return {state: {...state, mode: {...mode, text: step.text}}, effects: []};
+		}
 		case 'normal':
 			return normalKey(state, ctx, k);
 	}
+}
+
+/**
+ * A message after a key press: `enter` sends it, even when it arrives in the same input as typed text,
+ * and `esc`, or `enter` on an empty message, cancels it.
+ */
+function typeMessage(text: string, k: InputKey): {text: string} | {send: string} | 'cancel' {
+	if (k.escape) return 'cancel';
+	if (k.return) return text.trim() ? {send: text} : 'cancel';
+	if (k.backspace || k.delete) return {text: text.slice(0, -1)};
+	if (k.ctrl && k.input === 'u') return {text: ''};
+	if (k.ctrl || !k.input || k.upArrow || k.downArrow || k.leftArrow || k.rightArrow || k.tab) return {text};
+	const [typed, ...afterEnter] = k.input.split(/[\r\n]/);
+	const next = text + typed.replace(/[\x00-\x1f\x7f]/g, '');
+	if (!afterEnter.length) return {text: next};
+	return next.trim() ? {send: next} : 'cancel';
 }
 
 function normalKey(state: InputState, ctx: InputContext, k: InputKey): Result {
@@ -83,6 +108,8 @@ function normalKey(state: InputState, ctx: InputContext, k: InputKey): Result {
 			const id = nextMatch(ctx.view, state.query, result.direction);
 			return {state, effects: [id ? {type: 'setCursor', id} : flash('No matches')]};
 		}
+		case 'composeClaude':
+			return {state: {...state, mode: {kind: 'compose', checkout: result.checkout, text: ''}}, effects: []};
 		case 'leap': {
 			const leap = startLeap(ctx.view, ctx.listHeight);
 			return leap ? {state: {...state, mode: {kind: 'leap', leap}}, effects: []} : {state, effects: [flash('No other PRs on screen')]};

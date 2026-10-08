@@ -35,8 +35,8 @@ PRs are grouped by status, most actionable first:
 | Status | Meaning |
 |---|---|
 | ✔ ready to merge | Required checks pass and the PR is approved |
-| ⊘ bot blocking | The review bot is requesting changes |
 | ✗ checks failing | A required check failed |
+| ⊘ bot blocking | The review bot is requesting changes |
 | ● checks running | Required checks are still running |
 | ◎ in bot review | `tunnel-review-vision` is on, so checks are paused |
 | ◌ needs approval | Checks pass, but a human approval is missing |
@@ -62,6 +62,8 @@ ghpr looks through the git repos directly under `~/Projects` in the background, 
 | `n` / `N` | Next / previous match |
 | `O` | Open the PR in the browser |
 | `o` | Switch to the tmux session for the PR's local checkout, creating it if needed |
+| `c` | Write a message for claude in that session's window named `claude`; `enter` sends, `esc` cancels |
+| `B` | Ask that claude whether the review bot's blocking review is valid, when the bot is requesting changes |
 | `ctrl+g` | Open the PR's repo in GitQueue (`app.gitqueue.com/install/<owner>/<repo>`) |
 | `m` | Queue via GitQueue (`/gitqueue add normal`), only when ready |
 | `t` | Toggle the `tunnel-review-vision` label |

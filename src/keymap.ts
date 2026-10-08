@@ -43,6 +43,8 @@ export type Command =
 	| {type: 'refresh'}
 	| {type: 'openPr'; pr: PR}
 	| {type: 'openSession'; checkout: Checkout}
+	| {type: 'composeClaude'; checkout: Checkout}
+	| {type: 'sendClaude'; checkout: Checkout; text: string}
 	| {type: 'confirmQueue'; pr: PR}
 	| {type: 'toggleLabel'; pr: PR; label: string}
 	| {type: 'toggleArchive'; pr: PR}
@@ -77,6 +79,16 @@ const onDetailWithFailing = (ctx: KeyContext) => ctx.screen === 'detail' && ctx.
 const NO_PR = 'No PR selected';
 const gitQueueUrl = (repo: string) => `https://app.gitqueue.com/install/${repo}`;
 const withPr = (make: (pr: PR) => Command | string) => (ctx: KeyContext) => (ctx.pr ? make(ctx.pr) : NO_PR);
+
+export const BOT_REVIEW_PROMPT = "Review the bot's blocking review, is it valid? Should we address or push back?";
+
+/** Runs `make` with the focused PR's local checkout, which needs tmux. */
+const withCheckout = (make: (checkout: Checkout, pr: PR) => Command | string) => (ctx: KeyContext) => {
+	if (ctx.tmux === 'none') return 'Not running inside tmux';
+	if (!ctx.pr) return NO_PR;
+	if (ctx.checkout) return make(ctx.checkout, ctx.pr);
+	return ctx.scanning ? 'Still looking for local checkouts…' : `No checkout of ${ctx.pr.headRef} in ~/Projects`;
+};
 
 const BINDINGS: Binding[] = [
 	{keys: '↑/↓ j/k', label: 'move', when: onList, match: isUpOrDown, run: (_, k) => ({type: 'move', motion: isUp(k) ? 'up' : 'down'})},
@@ -138,12 +150,16 @@ const BINDINGS: Binding[] = [
 		keys: 'o',
 		label: 'open tmux session for local checkout',
 		match: plain('o'),
-		run: ctx => {
-			if (ctx.tmux === 'none') return 'Not running inside tmux';
-			if (!ctx.pr) return NO_PR;
-			if (ctx.checkout) return {type: 'openSession', checkout: ctx.checkout};
-			return ctx.scanning ? 'Still looking for local checkouts…' : `No checkout of ${ctx.pr.headRef} in ~/Projects`;
-		},
+		run: withCheckout(checkout => ({type: 'openSession', checkout})),
+	},
+	{keys: 'c', label: 'message the claude session', match: plain('c'), run: withCheckout(checkout => ({type: 'composeClaude', checkout}))},
+	{
+		keys: 'B',
+		label: 'ask claude about the bot review',
+		match: plain('B'),
+		run: withCheckout((checkout, pr) =>
+			pr.bot?.outcome === 'changes' ? {type: 'sendClaude', checkout, text: BOT_REVIEW_PROMPT} : "The review bot isn't blocking",
+		),
 	},
 	{
 		keys: 'ctrl+g',

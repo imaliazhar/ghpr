@@ -63,3 +63,26 @@ export async function openSession(dir: string, env: TmuxEnv = defaultEnv) {
 	await env.run(['switch-client', '-c', client, '-t', `=${name}`]);
 	await env.run(['detach-client', '-s', `=${env.popupSession}`]).catch(() => {});
 }
+
+export const CLAUDE_WINDOW = 'claude';
+
+/**
+ * Types `text` into the window named "claude" in the tmux session for `dir` and submits it. Pasting
+ * keeps a multi-line message together instead of submitting at its first newline. Throws without
+ * sending anything when the session or a window with that exact name is missing.
+ */
+export async function sendToClaude(dir: string, text: string, env: TmuxEnv = defaultEnv) {
+	const name = sessionName(dir);
+	const windows = await env.run(['list-windows', '-t', `=${name}`, '-F', '#{window_index} #{window_name}']).catch(() => {
+		throw new Error(`No tmux session ${name}`);
+	});
+	const index = windows
+		.split('\n')
+		.map(line => line.match(/^(\d+) (.*)$/))
+		.find(match => match?.[2] === CLAUDE_WINDOW)?.[1];
+	if (!index) throw new Error(`No "${CLAUDE_WINDOW}" window in ${name}`);
+	const target = `=${name}:${index}`;
+	await env.run(['set-buffer', '-b', 'ghpr', '--', text]);
+	await env.run(['paste-buffer', '-d', '-p', '-b', 'ghpr', '-t', target]);
+	await env.run(['send-keys', '-t', target, 'Enter']);
+}

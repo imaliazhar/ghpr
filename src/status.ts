@@ -2,7 +2,7 @@ import type {PR} from './github.js';
 
 export type Status = 'ready' | 'blocked' | 'failing' | 'pending' | 'botReview' | 'approval';
 
-export const STATUS_ORDER: Status[] = ['ready', 'blocked', 'failing', 'pending', 'botReview', 'approval'];
+export const STATUS_ORDER: Status[] = ['ready', 'failing', 'blocked', 'pending', 'botReview', 'approval'];
 
 export const STATUS_META: Record<Status, {icon: string; label: string; color: string}> = {
 	ready: {icon: '✔', label: 'ready to merge', color: 'green'},

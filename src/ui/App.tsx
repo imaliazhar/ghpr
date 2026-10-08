@@ -1,7 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {openUrl, queueForMerge, setLabel} from '../actions.js';
-import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sessionName} from '../tmux.js';
+import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sendToClaude, sessionName} from '../tmux.js';
 import {currentBranch} from '../git.js';
 import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
 import type {PR} from '../github.js';
@@ -199,6 +199,13 @@ export function App({all}: {all: boolean}) {
 				flash(`Opening ${name}…`, 'yellow');
 				return void openSession(command.checkout.dir).then(
 					() => flash(`Switched to ${name}`),
+					e => flash(errorText(e), 'red'),
+				);
+			}
+			case 'sendClaude': {
+				const name = sessionName(command.checkout.dir);
+				return void sendToClaude(command.checkout.dir, command.text).then(
+					() => flash(`Sent to claude in ${name}`),
 					e => flash(errorText(e), 'red'),
 				);
 			}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
-import {keyHelp, resolveKey, type KeyContext, type KeyPress} from '../src/keymap.js';
+import {BOT_REVIEW_PROMPT, keyHelp, resolveKey, type KeyContext, type KeyPress} from '../src/keymap.js';
 import {failing, pr, ready} from './fixtures.js';
 
 const ctx = (overrides: Partial<KeyContext> = {}): KeyContext => ({
@@ -34,6 +34,18 @@ function pressFor(keys: string): KeyPress {
 }
 
 describe('resolveKey', () => {
+	test('c messages the claude session of the local checkout', () => {
+		assert.deepEqual(resolveKey(ctx({checkout}), key('c')), {type: 'composeClaude', checkout});
+		assert.deepEqual(resolveKey(ctx({tmux: 'none', checkout}), key('c')), {type: 'unavailable', reason: 'Not running inside tmux'});
+	});
+
+	test('B asks claude about a blocking bot review', () => {
+		const bot = (outcome: 'changes' | 'approved') => ({outcome, strategy: null, items: [], parsed: true});
+		assert.deepEqual(resolveKey(ctx({checkout, pr: pr({bot: bot('changes')})}), key('B')), {type: 'sendClaude', checkout, text: BOT_REVIEW_PROMPT});
+		assert.deepEqual(resolveKey(ctx({checkout, pr: pr({bot: bot('approved')})}), key('B')), {type: 'unavailable', reason: "The review bot isn't blocking"});
+		assert.match((resolveKey(ctx({pr: pr({bot: bot('changes')})}), key('B')) as {reason: string}).reason, /^No checkout of/);
+	});
+
 	test('moves the list cursor with arrows, vim keys and half pages', () => {
 		assert.deepEqual(resolveKey(ctx(), key('j')), {type: 'move', motion: 'down'});
 		assert.deepEqual(resolveKey(ctx(), key('', {upArrow: true})), {type: 'move', motion: 'up'});
