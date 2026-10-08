@@ -14,8 +14,10 @@ A terminal dashboard for your open GitHub pull requests. It shows what each PR i
 
 ```sh
 npm install
-npm link   # makes `ghpr` available everywhere
+npm run install:local   # bundles the app into a single file at ~/.local/bin/ghpr
 ```
+
+Rerun `npm run install:local` after pulling changes. For development, `npm start` runs from source.
 
 ## Usage
 

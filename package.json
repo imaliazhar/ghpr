@@ -7,7 +7,9 @@
     "ghpr": "./bin/ghpr.js"
   },
   "scripts": {
-    "start": "tsx src/cli.tsx"
+    "start": "tsx src/cli.tsx",
+    "build": "node scripts/build.mjs",
+    "install:local": "npm run build && mkdir -p ~/.local/bin && cp dist/ghpr.mjs ~/.local/bin/ghpr && chmod +x ~/.local/bin/ghpr && echo 'Installed ~/.local/bin/ghpr'"
   },
   "dependencies": {
     "ink": "^5.2.1",
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.31",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   }
 }
