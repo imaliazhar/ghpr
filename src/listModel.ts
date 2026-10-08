@@ -94,3 +94,10 @@ export function toggleArchived(prs: PR[], options: ListOptions, url: string): {a
 	const at = ids.indexOf(url);
 	return {archived, cursor: [...ids.slice(at + 1), ...ids.slice(0, at).reverse()].find(id => nextIds.includes(id)) ?? null};
 }
+
+/** Drops archived urls that are no longer open. Returns `archived` itself when nothing changed. */
+export function pruneArchived(archived: Set<string>, open: PR[]): Set<string> {
+	const urls = new Set(open.map(p => p.url));
+	const kept = new Set([...archived].filter(url => urls.has(url)));
+	return kept.size === archived.size ? archived : kept;
+}

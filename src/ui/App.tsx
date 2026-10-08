@@ -2,17 +2,19 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
 import {openUrl, queueForMerge, setLabel} from '../actions.js';
 import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sessionName} from '../tmux.js';
-import {currentBranch, findBranchPr} from '../git.js';
+import {currentBranch} from '../git.js';
 import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
-import {fetchAll, type PR} from '../github.js';
+import type {PR} from '../github.js';
 import {keyHelp, resolveKey, type Command, type KeyContext} from '../keymap.js';
-import {ARCHIVED_TOGGLE, listView, move, toggleArchived} from '../listModel.js';
-import {archivedPrs, lastTab, prCache} from '../store.js';
+import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
+import {startView} from '../prData.js';
+import {archivedPrs, lastTab} from '../store.js';
 import {failingChecks, hasLabel} from '../status.js';
 import {KeyHelp, Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
 import {ListScreen} from './ListScreen.js';
 import {buildTabs} from './TabBar.js';
+import {usePrData} from './usePrData.js';
 
 type Screen = {kind: 'list'} | {kind: 'detail'; url: string};
 type Message = {text: string; color: string};
@@ -39,22 +41,17 @@ function Updated({at}: {at: number}) {
 export function App({all}: {all: boolean}) {
 	const {exit} = useApp();
 	const branch = useMemo(() => (all ? Promise.resolve(null) : currentBranch()), [all]);
-	const cache = useMemo(prCache.load, []);
 	const startViewApplied = useRef(false);
 	const hasInteracted = useRef(false);
 	const {columns, rows: terminalRows} = useTerminalSize();
+	const data = usePrData(branch);
+	const {mine, current, fresh, loading, error, fetchedAt, reload, patch} = data;
 
-	const [mine, setMine] = useState<PR[]>(() => cache?.mine ?? []);
-	const [fresh, setFresh] = useState(false);
-	const [current, setCurrent] = useState<PR | null>(null);
 	const [archived, setArchived] = useState(archivedPrs.load);
 	const [showArchived, setShowArchived] = useState(false);
 	const [tab, setTab] = useState<string | null>(lastTab.load);
 	const [screen, setScreen] = useState<Screen>({kind: 'list'});
 	const [cursor, setCursor] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-	const [fetchedAt, setFetchedAt] = useState<number | null>(() => cache?.savedAt ?? null);
 	const [helpOpen, setHelpOpen] = useState(false);
 	const [message, setMessage] = useState<Message | null>(null);
 	const [confirm, setConfirm] = useState<PR | null>(null);
@@ -75,52 +72,21 @@ export function App({all}: {all: boolean}) {
 		setArchived(next);
 	};
 
-	const applyStartView = (prs: PR[], current: PR | null) => {
+	useEffect(() => {
+		if (!fresh) return;
+		const kept = pruneArchived(archived, mine);
+		if (kept !== archived) updateArchived(kept);
+	}, [fresh, mine]);
+
+	useEffect(() => {
+		if (startViewApplied.current || hasInteracted.current) return;
+		const start = startView(data);
+		if (start === undefined) return;
 		startViewApplied.current = true;
-		if (!current) return;
-		if (prs.some(p => p.repo === current.repo)) setTab(current.repo);
-		setScreen({kind: 'detail', url: current.url});
-	};
-
-	useEffect(() => {
-		if (!cache) return;
-		branch.then(b => {
-			const match = b && findBranchPr(cache.mine, b);
-			if (match && !startViewApplied.current && !hasInteracted.current) applyStartView(cache.mine, match);
-		});
-	}, [cache, branch]);
-
-	const load = useCallback(async () => {
-		setLoading(true);
-		try {
-			const b = await branch;
-			const result = await fetchAll(b);
-			setMine(result.mine);
-			setCurrent(result.current);
-			setFresh(true);
-			setError(null);
-			prCache.save(result.mine);
-			setFetchedAt(Date.now());
-
-			const openUrls = new Set(result.mine.map(p => p.url));
-			setArchived(prev => {
-				const kept = new Set([...prev].filter(url => openUrls.has(url)));
-				if (kept.size === prev.size) return prev;
-				archivedPrs.save(kept);
-				return kept;
-			});
-
-			if (!startViewApplied.current && !hasInteracted.current) applyStartView(result.mine, result.current);
-		} catch (e) {
-			setError(errorText(e));
-		} finally {
-			setLoading(false);
-		}
-	}, [branch]);
-
-	useEffect(() => {
-		load();
-	}, [load]);
+		if (!start) return;
+		if (start.tab) setTab(start.tab);
+		setScreen({kind: 'detail', url: start.url});
+	}, [current, fresh]);
 
 	const scan = useCallback(() => {
 		scanCheckouts().then(setCheckouts);
@@ -144,14 +110,9 @@ export function App({all}: {all: boolean}) {
 		if (screen.kind === 'detail' && !loading && !detailPr) setScreen({kind: 'list'});
 	}, [screen, loading, detailPr]);
 
-	const patchPr = (url: string, patch: (pr: PR) => PR) => {
-		setMine(prs => prs.map(p => (p.url === url ? patch(p) : p)));
-		setCurrent(c => (c?.url === url ? patch(c) : c));
-	};
-
 	const toggleLabel = async (pr: PR, label: string) => {
 		const on = !hasLabel(pr, label);
-		patchPr(pr.url, p => ({
+		patch(pr.url, p => ({
 			...p,
 			labels: on ? [...p.labels, {name: label, color: 'ededed'}] : p.labels.filter(l => l.name !== label),
 		}));
@@ -161,7 +122,7 @@ export function App({all}: {all: boolean}) {
 		} catch (e) {
 			flash(errorText(e), 'red');
 		}
-		load();
+		reload();
 	};
 
 	const queue = async (pr: PR) => {
@@ -227,7 +188,7 @@ export function App({all}: {all: boolean}) {
 				return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
 			case 'refresh':
 				scan();
-				return void load();
+				return void reload();
 			case 'openPr':
 				return openUrl(command.pr.url);
 			case 'openSession': {

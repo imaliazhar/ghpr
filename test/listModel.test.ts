@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
-import {ARCHIVED_TOGGLE, listView, move, rowId, toggleArchived, type ListOptions} from '../src/listModel.js';
+import {ARCHIVED_TOGGLE, listView, move, pruneArchived, rowId, toggleArchived, type ListOptions} from '../src/listModel.js';
 import {failing, pr, ready} from './fixtures.js';
 
 const options = (overrides: Partial<ListOptions> = {}): ListOptions => ({tab: null, archived: new Set(), showArchived: false, ...overrides});
@@ -100,5 +100,14 @@ describe('toggleArchived', () => {
 		const prs = [ready()];
 		toggleArchived(prs, options({archived}), prs[0].url);
 		assert.equal(archived.size, 0);
+	});
+});
+
+describe('pruneArchived', () => {
+	test('drops closed PRs and keeps the same set when nothing changed', () => {
+		const open = [ready(), ready()];
+		const kept = new Set([open[0].url]);
+		assert.equal(pruneArchived(kept, open), kept);
+		assert.deepEqual([...pruneArchived(new Set([open[1].url, 'closed']), open)], [open[1].url]);
 	});
 });
