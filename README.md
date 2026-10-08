@@ -48,6 +48,8 @@ Only required checks count. Archived PRs sit collapsed at the bottom.
 | Key | Action |
 |---|---|
 | `↑/↓` `j/k` | Move |
+| `g` / `G` | Jump to top / bottom |
+| `ctrl+u` / `ctrl+d` | Half a screen up / down (list) |
 | `←/→` `h/l` `tab` | Switch repo tab |
 | `enter` | Open PR details / open the selected failing check |
 | `w` | Open the PR in the browser |
@@ -57,7 +59,18 @@ Only required checks count. Archived PRs sit collapsed at the bottom.
 | `a` | Archive / unarchive |
 | `esc` | Back to the list |
 | `R` | Refresh |
-| `q` | Quit |
+| `q` | Quit (hides the popup in [tmux popup mode](#tmux-popup)) |
+
+## tmux popup
+
+Run ghpr in its own tmux session with `GHPR_POPUP` set to that session's name, and attach to it from `display-popup`. `q` and `esc` then detach the session instead of quitting, so ghpr keeps its state between toggles:
+
+```sh
+tmux new-session -d -s _ghpr -e GHPR_POPUP=_ghpr ghpr
+tmux display-popup -E "TMUX= tmux attach-session -t =_ghpr"
+```
+
+If tmux can't detach the session, ghpr quits.
 
 ## Local files
 

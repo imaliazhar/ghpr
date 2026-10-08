@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {Box, Text, useInput} from 'ink';
-import {openUrl} from '../actions.js';
+import {inTmuxPopup, openUrl} from '../actions.js';
 import type {BotItem} from '../botReview.js';
 import type {PR} from '../github.js';
 import {STATUS_META, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
@@ -32,8 +32,11 @@ export function DetailScreen({pr, archived, canQueue, active, onBack, onRetry, o
 	useInput(
 		(input, key) => {
 			if (key.escape) onBack();
+			if (key.ctrl) return;
 			if (key.upArrow || input === 'k') setCursor(Math.max(0, selected - 1));
 			if (key.downArrow || input === 'j') setCursor(Math.min(failing.length - 1, selected + 1));
+			if (input === 'g') setCursor(0);
+			if (input === 'G') setCursor(Math.max(0, failing.length - 1));
 			if (key.return && failing[selected]) {
 				const url = failing[selected].url;
 				if (url) openUrl(url);
@@ -156,7 +159,7 @@ export function DetailScreen({pr, archived, canQueue, active, onBack, onRetry, o
 					...prActions(pr, canQueue),
 					{key: 'esc', label: 'back'},
 					{key: 'R', label: 'refresh'},
-					{key: 'q', label: 'quit'},
+					{key: 'q', label: inTmuxPopup ? 'hide' : 'quit'},
 				]}
 			/>
 		</Box>

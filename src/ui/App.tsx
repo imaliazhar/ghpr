@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
-import {openUrl, queueForMerge, setLabel} from '../actions.js';
+import {hideTmuxPopup, inTmuxPopup, openUrl, queueForMerge, setLabel} from '../actions.js';
 import {loadArchived, saveArchived} from '../archive.js';
 import {loadCache, saveCache} from '../cache.js';
 import {currentBranch, type Branch} from '../git.js';
@@ -9,11 +9,31 @@ import {fetchAll, type PR} from '../github.js';
 import {IN_REVIEW_LABEL, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
 import {Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
-import {ListScreen, buildRows, rowId} from './ListScreen.js';
+import {ListScreen, buildRows, rowId, selectableIds, type Row} from './ListScreen.js';
 import {buildTabs} from './TabBar.js';
 
 type Screen = {kind: 'list'} | {kind: 'detail'; url: string};
 type Message = {text: string; color: string};
+
+function sectionNeighbour(rows: Row[], index: number) {
+	const next = rows[index + 1];
+	if (next?.kind === 'pr') return next.pr.url;
+	const previous = rows[index - 1];
+	return previous?.kind === 'pr' ? previous.pr.url : null;
+}
+
+/** Next PR in the same section, else the toggled PR if still listed, else the nearest remaining row. */
+function cursorAfterArchiveToggle(rows: Row[], nextRows: Row[], id: string) {
+	const index = rows.findIndex(r => rowId(r) === id);
+	if (index < 0) return undefined;
+	const neighbour = sectionNeighbour(rows, index);
+	if (neighbour) return neighbour;
+	const nextIds = selectableIds(nextRows);
+	if (nextIds.includes(id)) return id;
+	const ids = selectableIds(rows);
+	const at = ids.indexOf(id);
+	return [...ids.slice(at + 1), ...ids.slice(0, at).reverse()].find(i => nextIds.includes(i)) ?? null;
+}
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -111,11 +131,9 @@ export function App({all}: {all: boolean}) {
 
 	const tabs = useMemo(() => buildTabs(mine, archived), [mine, archived]);
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
-	const rows = useMemo(
-		() => buildRows(activeTab ? mine.filter(p => p.repo === activeTab) : mine, archived, showArchived),
-		[mine, activeTab, archived, showArchived],
-	);
-	const ids = rows.map(rowId).filter((id): id is string => id !== null);
+	const tabPrs = useMemo(() => (activeTab ? mine.filter(p => p.repo === activeTab) : mine), [mine, activeTab]);
+	const rows = useMemo(() => buildRows(tabPrs, archived, showArchived), [tabPrs, archived, showArchived]);
+	const ids = selectableIds(rows);
 	const activeCursor = cursor && ids.includes(cursor) ? cursor : (ids[0] ?? null);
 
 	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
@@ -160,6 +178,8 @@ export function App({all}: {all: boolean}) {
 		if (next.has(pr.url)) next.delete(pr.url);
 		else next.add(pr.url);
 		updateArchived(next);
+		const nextCursor = cursorAfterArchiveToggle(rows, buildRows(tabPrs, next, showArchived), pr.url);
+		if (nextCursor !== undefined) setCursor(nextCursor);
 		flash(next.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
 	};
 
@@ -173,7 +193,8 @@ export function App({all}: {all: boolean}) {
 			setConfirm(null);
 			return;
 		}
-		if (input === 'q' || (key.escape && screen.kind === 'list')) return exit();
+		if (key.ctrl) return;
+		if (input === 'q' || (key.escape && screen.kind === 'list')) return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
 		if (input === 'R') return void load();
 		if (!focused) return;
 		if (input === 'w') openUrl(focused.url);

@@ -1,5 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, useInput, type DOMElement} from 'ink';
+import {inTmuxPopup} from '../actions.js';
 import type {PR} from '../github.js';
 import {STATUS_META, STATUS_ORDER, statusOf, type Status} from '../status.js';
 import {Footer, Tags, prActions} from './common.js';
@@ -14,6 +15,8 @@ export type Row =
 	| {kind: 'archivedToggle'; count: number};
 
 export const rowId = (row: Row) => (row.kind === 'pr' ? row.pr.url : row.kind === 'archivedToggle' ? ARCHIVED_TOGGLE : null);
+
+export const selectableIds = (rows: Row[]) => rows.map(rowId).filter((id): id is string => id !== null);
 
 export function buildRows(prs: PR[], archived: Set<string>, showArchived: boolean): Row[] {
 	const rows: Row[] = [];
@@ -57,13 +60,28 @@ export function ListScreen({tabs, tab, onTab, rows, cursor, focused, canQueue, a
 		const measured = measureElement(listRef.current).height - 2;
 		if (measured > 0 && measured !== listHeight) setListHeight(measured);
 	});
-	const ids = rows.map(rowId).filter((id): id is string => id !== null);
+	const ids = selectableIds(rows);
+	const height = Math.max(1, listHeight - 2);
 
 	useInput(
 		(input, key) => {
 			const index = cursor ? ids.indexOf(cursor) : -1;
-			if (key.upArrow || input === 'k') onMove(ids[Math.max(0, index - 1)]);
-			if (key.downArrow || input === 'j') onMove(ids[Math.min(ids.length - 1, index + 1)]);
+			const moveTo = (i: number) => ids.length && onMove(ids[Math.max(0, Math.min(ids.length - 1, i))]);
+			const halfPage = (direction: 1 | -1) => {
+				const from = rows.findIndex(r => rowId(r) === cursor);
+				const target = Math.max(0, Math.min(rows.length - 1, from + direction * Math.max(1, Math.floor(height / 2))));
+				const candidates = direction > 0 ? rows.slice(target) : rows.slice(0, target + 1).reverse();
+				const id = selectableIds(candidates)[0];
+				if (id) onMove(id);
+				else moveTo(direction > 0 ? ids.length - 1 : 0);
+			};
+			if (key.ctrl && input === 'u') return halfPage(-1);
+			if (key.ctrl && input === 'd') return halfPage(1);
+			if (key.ctrl) return;
+			if (key.upArrow || input === 'k') moveTo(index - 1);
+			if (key.downArrow || input === 'j') moveTo(index + 1);
+			if (input === 'g') moveTo(0);
+			if (input === 'G') moveTo(ids.length - 1);
 			if (key.return) {
 				if (cursor === ARCHIVED_TOGGLE) onToggleArchived();
 				else if (focused) onOpen(focused);
@@ -77,7 +95,6 @@ export function ListScreen({tabs, tab, onTab, rows, cursor, focused, canQueue, a
 
 	const repoLabels = new Map(tabs.flatMap(t => (t.repo ? [[t.repo, t.label] as const] : [])));
 	const repoWidth = tab ? 0 : Math.min(24, Math.max(...[...repoLabels.values()].map(l => l.length))) + 2;
-	const height = Math.max(1, listHeight - 2);
 	const selected = rows.findIndex(r => rowId(r) === cursor);
 	const start = Math.max(0, Math.min(selected - Math.floor(height / 2), rows.length - height));
 	const visible = rows.slice(start, start + height);
@@ -137,11 +154,12 @@ export function ListScreen({tabs, tab, onTab, rows, cursor, focused, canQueue, a
 			<Footer
 				items={[
 					{key: '↑/↓', label: 'move'},
+					{key: 'g/G', label: 'top/bottom'},
 					{key: '←/→', label: 'repo'},
 					{key: 'enter', label: cursor === ARCHIVED_TOGGLE ? 'expand' : 'details'},
 					...prActions(focused, canQueue),
 					{key: 'R', label: 'refresh'},
-					{key: 'q', label: 'quit'},
+					{key: 'q', label: inTmuxPopup ? 'hide' : 'quit'},
 				]}
 			/>
 		</Box>
