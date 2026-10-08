@@ -14,6 +14,7 @@ const ctx = (overrides: Partial<KeyContext> = {}): KeyContext => ({
 	tmux: 'pane',
 	checkout: undefined,
 	scanning: false,
+	searching: false,
 	...overrides,
 });
 const key = (input: string, extra: Partial<KeyPress> = {}): KeyPress => ({input, ...extra});
@@ -21,7 +22,7 @@ const checkout = {owner: 'acme', name: 'app', branch: 'b', dir: '/p/app'};
 
 /** One key press for each help row, built from its first listed key. */
 function pressFor(keys: string): KeyPress {
-	const first = keys.split(/[ /]/)[0];
+	const first = keys.split(/(?<=.)[ /]/)[0];
 	const named: Record<string, KeyPress> = {
 		'↑': key('', {upArrow: true}),
 		'←': key('', {leftArrow: true}),
@@ -42,7 +43,7 @@ describe('resolveKey', () => {
 
 	test('ignores ctrl chords of letter keys', () => {
 		assert.equal(resolveKey(ctx(), key('t', {ctrl: true})), null);
-		assert.equal(resolveKey(ctx(), key('w', {ctrl: true})), null);
+		assert.equal(resolveKey(ctx(), key('O', {ctrl: true})), null);
 	});
 
 	test('switches tabs both ways', () => {
@@ -60,6 +61,12 @@ describe('resolveKey', () => {
 	test('esc goes back from details and quits from the list', () => {
 		assert.deepEqual(resolveKey(ctx({screen: 'detail'}), key('', {escape: true})), {type: 'back'});
 		assert.deepEqual(resolveKey(ctx(), key('', {escape: true})), {type: 'quit'});
+	});
+
+	test('esc clears an active search before quitting', () => {
+		assert.deepEqual(resolveKey(ctx({searching: true}), key('', {escape: true})), {type: 'clearSearch'});
+		assert.deepEqual(resolveKey(ctx({searching: true}), key('N')), {type: 'cycleMatch', direction: -1});
+		assert.equal(resolveKey(ctx(), key('n')), null);
 	});
 
 	test('explains why o is unavailable', () => {
@@ -96,6 +103,7 @@ describe('keyHelp', () => {
 		['list on archived toggle', ctx({pr: undefined, onArchivedToggle: true})],
 		['detail with failing checks', ctx({screen: 'detail', failingChecks: [{name: 'a', state: 'failing', url: null}]})],
 		['outside tmux', ctx({tmux: 'none'})],
+		['list with a search', ctx({searching: true})],
 	];
 
 	for (const [name, c] of contexts) {

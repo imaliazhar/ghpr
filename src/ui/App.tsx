@@ -9,6 +9,7 @@ import {keyHelp, resolveKey, type Command, type KeyContext} from '../keymap.js';
 import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
 import {startView} from '../prData.js';
 import {archivedPrs, lastTab} from '../store.js';
+import {cycleMatch, editQuery, matchTitles} from '../search.js';
 import {failingChecks, hasLabel} from '../status.js';
 import {KeyHelp, Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
@@ -18,6 +19,8 @@ import {usePrData} from './usePrData.js';
 
 type Screen = {kind: 'list'} | {kind: 'detail'; url: string};
 type Message = {text: string; color: string};
+/** `typing` is true while keys go into the query; `origin` is the cursor to restore when it's cancelled. */
+type Search = {query: string; typing: boolean; origin: string | null};
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -58,6 +61,7 @@ export function App({all}: {all: boolean}) {
 	const [checkouts, setCheckouts] = useState<Checkout[] | null>(null);
 	const [listHeight, setListHeight] = useState(10);
 	const [checkIndex, setCheckIndex] = useState(0);
+	const [search, setSearch] = useState<Search | null>(null);
 
 	const flash = (text: string, color = 'green') => setMessage({text, color});
 
@@ -100,6 +104,8 @@ export function App({all}: {all: boolean}) {
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
 	const listOptions = useMemo(() => ({tab: activeTab, archived, showArchived}), [activeTab, archived, showArchived]);
 	const view = useMemo(() => listView(mine, listOptions, cursor), [mine, listOptions, cursor]);
+	const listedPrs = useMemo(() => view.rows.flatMap(r => (r.kind === 'pr' ? [r.pr] : [])), [view.rows]);
+	const matches = useMemo(() => matchTitles(listedPrs, search?.query ?? '').matches, [listedPrs, search?.query]);
 
 	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...mine, current] : mine, checkouts ?? []), [mine, current, checkouts]);
 
@@ -154,6 +160,7 @@ export function App({all}: {all: boolean}) {
 		tmux: inTmuxPopup ? 'popup' : inTmux ? 'pane' : 'none',
 		checkout: focused && checkoutMap.get(focused.url),
 		scanning: checkouts === null,
+		searching: !!search,
 	};
 
 	const run = (command: Command) => {
@@ -205,7 +212,26 @@ export function App({all}: {all: boolean}) {
 				return void toggleLabel(command.pr, command.label);
 			case 'toggleArchive':
 				return toggleArchive(command.pr);
+			case 'search':
+				return setSearch({query: '', typing: true, origin: view.cursor});
+			case 'cycleMatch': {
+				const url = cycleMatch(listedPrs.map(p => p.url), matches, view.cursor, command.direction);
+				return url ? setCursor(url) : flash('No matches', 'gray');
+			}
+			case 'clearSearch':
+				return setSearch(null);
 		}
+	};
+
+	const typeSearch = (current: Search, next: ReturnType<typeof editQuery>) => {
+		if (next === 'cancel') {
+			setSearch(null);
+			return setCursor(current.origin);
+		}
+		if (next === 'done') return setSearch(current.query ? {...current, typing: false} : null);
+		const found = matchTitles(listedPrs, next);
+		if (found.best) setCursor(found.best);
+		setSearch({...current, query: next});
 	};
 
 	useInput((input, key) => {
@@ -220,6 +246,7 @@ export function App({all}: {all: boolean}) {
 			if (key.escape || input === '?') setHelpOpen(false);
 			return;
 		}
+		if (search?.typing) return typeSearch(search, editQuery(search.query, {...key, input}));
 		if (input === '?') return setHelpOpen(true);
 		const result = resolveKey(keyContext, {...key, input});
 		if (result?.type === 'unavailable') flash(result.reason, 'gray');
@@ -242,6 +269,7 @@ export function App({all}: {all: boolean}) {
 					tabs={tabs}
 					tab={activeTab}
 					view={view}
+					matches={matches}
 					checkouts={checkoutMap}
 					showArchived={showArchived}
 					onHeight={setListHeight}
@@ -253,6 +281,17 @@ export function App({all}: {all: boolean}) {
 					{confirm ? (
 						<Text color="yellow" bold>
 							Queue {confirm.repo}#{confirm.number} via GitQueue? (y/n)
+						</Text>
+					) : search?.typing ? (
+						<Text wrap="truncate">
+							<Text color="cyan">/{search.query}</Text>
+							<Text inverse> </Text>
+							{search.query && (
+								<Text color={matches.size ? undefined : 'red'} dimColor={matches.size > 0}>
+									{'  '}
+									{matches.size ? `${matches.size} matches` : 'no matches'}
+								</Text>
+							)}
 						</Text>
 					) : message ? (
 						<Text color={message.color} wrap="truncate">

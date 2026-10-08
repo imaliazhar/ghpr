@@ -27,6 +27,8 @@ export type KeyContext = {
 	tmux: 'none' | 'pane' | 'popup';
 	checkout: Checkout | undefined;
 	scanning: boolean;
+	/** A search query is set, so its matches are highlighted. */
+	searching: boolean;
 };
 
 export type Command =
@@ -43,7 +45,10 @@ export type Command =
 	| {type: 'openSession'; checkout: Checkout}
 	| {type: 'confirmQueue'; pr: PR}
 	| {type: 'toggleLabel'; pr: PR; label: string}
-	| {type: 'toggleArchive'; pr: PR};
+	| {type: 'toggleArchive'; pr: PR}
+	| {type: 'search'}
+	| {type: 'cycleMatch'; direction: 1 | -1}
+	| {type: 'clearSearch'};
 
 export type KeyResult = Command | {type: 'unavailable'; reason: string};
 
@@ -65,6 +70,7 @@ const isPrevTab = (k: KeyPress) => !!(k.leftArrow || (k.tab && k.shift)) || plai
 const isNextTab = (k: KeyPress) => !!(k.rightArrow || (k.tab && !k.shift)) || plain('l')(k);
 
 const onList = (ctx: KeyContext) => ctx.screen === 'list';
+const onListSearching = (ctx: KeyContext) => onList(ctx) && ctx.searching;
 const onDetailWithFailing = (ctx: KeyContext) => ctx.screen === 'detail' && ctx.failingChecks.length > 0;
 
 const NO_PR = 'No PR selected';
@@ -86,6 +92,14 @@ const BINDINGS: Binding[] = [
 		when: onList,
 		match: k => isPrevTab(k) || isNextTab(k),
 		run: (_, k) => ({type: 'tab', delta: k && isPrevTab(k) ? -1 : 1}),
+	},
+	{keys: '/', label: 'search titles', when: onList, match: plain('/'), run: () => ({type: 'search'})},
+	{
+		keys: 'n/N',
+		label: 'next / previous match',
+		when: onListSearching,
+		match: plain('n', 'N'),
+		run: (_, k) => ({type: 'cycleMatch', direction: k?.input === 'N' ? -1 : 1}),
 	},
 	{
 		keys: 'enter',
@@ -116,7 +130,7 @@ const BINDINGS: Binding[] = [
 		run: ctx => (ctx.selectedCheck?.url ? {type: 'openCheck', url: ctx.selectedCheck.url} : 'This check has no details link'),
 	},
 	{keys: 'r', label: 'retry check', when: onDetailWithFailing, match: plain('r'), run: () => 'Retry is coming in phase 2'},
-	{keys: 'w', label: 'open PR in browser', match: plain('w'), run: withPr(pr => ({type: 'openPr', pr}))},
+	{keys: 'O', label: 'open PR in browser', match: plain('O'), run: withPr(pr => ({type: 'openPr', pr}))},
 	{
 		keys: 'o',
 		label: 'open tmux session for local checkout',
@@ -142,6 +156,7 @@ const BINDINGS: Binding[] = [
 	{keys: 'b', label: `toggle ${IN_REVIEW_LABEL}`, match: plain('b'), run: withPr(pr => ({type: 'toggleLabel', pr, label: IN_REVIEW_LABEL}))},
 	{keys: 'a', label: 'archive / unarchive', match: plain('a'), run: withPr(pr => ({type: 'toggleArchive', pr}))},
 	{keys: 'esc', label: 'back to list', when: ctx => ctx.screen === 'detail', match: k => !!k.escape, run: () => ({type: 'back'})},
+	{keys: 'esc', label: 'clear search', when: onListSearching, match: k => !!k.escape, run: () => ({type: 'clearSearch'})},
 	{keys: 'R', label: 'refresh', match: plain('R'), run: () => ({type: 'refresh'})},
 	{
 		keys: 'q',

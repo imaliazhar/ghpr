@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, type DOMElement} from 'ink';
 import type {Checkout} from '../checkouts.js';
 import {rowId, type ListView} from '../listModel.js';
+import {highlight, type TitleMatches} from '../search.js';
 import {STATUS_META, statusOf} from '../status.js';
 import {TabBar, type Tab} from './TabBar.js';
 
@@ -9,13 +10,14 @@ type Props = {
 	tabs: Tab[];
 	tab: string | null;
 	view: ListView;
+	matches: TitleMatches;
 	checkouts: Map<string, Checkout>;
 	showArchived: boolean;
 	/** Reports how many rows fit, for half-page motions. */
 	onHeight: (rows: number) => void;
 };
 
-export function ListScreen({tabs, tab, view, checkouts, showArchived, onHeight}: Props) {
+export function ListScreen({tabs, tab, view, matches, checkouts, showArchived, onHeight}: Props) {
 	const listRef = useRef<DOMElement>(null);
 	const [listHeight, setListHeight] = useState(10);
 	useEffect(() => {
@@ -81,7 +83,15 @@ export function ListScreen({tabs, tab, view, checkouts, showArchived, onHeight}:
 							)}
 							<Box flexGrow={1} flexShrink={1}>
 								<Text bold={isSel} dimColor={row.archived} wrap="truncate">
-									{row.pr.title}
+									{highlight(row.pr.title, matches.get(row.pr.url)).map((run, j) =>
+										run.matched ? (
+											<Text key={j} color="yellow" bold>
+												{run.text}
+											</Text>
+										) : (
+											run.text
+										),
+									)}
 								</Text>
 							</Box>
 						</Box>

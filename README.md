@@ -57,13 +57,15 @@ ghpr looks through the git repos directly under `~/Projects` in the background, 
 | `ctrl+u` / `ctrl+d` | Half a screen up / down (list) |
 | `←/→` `h/l` `tab` | Switch repo tab |
 | `enter` | Open PR details / open the selected failing check |
-| `w` | Open the PR in the browser |
+| `/` | Fuzzy search titles: matches are highlighted and the cursor jumps to the best one. `enter` stops typing, `esc` cancels |
+| `n` / `N` | Next / previous match |
+| `O` | Open the PR in the browser |
 | `o` | Switch to the tmux session for the PR's local checkout, creating it if needed |
 | `m` | Queue via GitQueue (`/gitqueue add normal`), only when ready |
 | `t` | Toggle the `tunnel-review-vision` label |
 | `b` | Toggle the `in-review` label |
 | `a` | Archive / unarchive |
-| `esc` | Back to the list |
+| `esc` | Back to the list / clear the search |
 | `R` | Refresh |
 | `q` | Quit (hides the popup in [tmux popup mode](#tmux-popup)) |
 
