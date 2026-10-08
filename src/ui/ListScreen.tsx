@@ -1,31 +1,21 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Box, Text, measureElement, useInput, type DOMElement} from 'ink';
-import {inTmuxPopup} from '../tmux.js';
+import {Box, Text, measureElement, type DOMElement} from 'ink';
 import type {Checkout} from '../checkouts.js';
-import type {PR} from '../github.js';
-import {ARCHIVED_TOGGLE, move, rowId, type ListView, type Motion} from '../listModel.js';
+import {rowId, type ListView} from '../listModel.js';
 import {STATUS_META, statusOf} from '../status.js';
-import {KeyHelp, prActions} from './common.js';
 import {TabBar, type Tab} from './TabBar.js';
 
 type Props = {
 	tabs: Tab[];
 	tab: string | null;
-	onTab: (repo: string | null) => void;
 	view: ListView;
-	focused: PR | undefined;
-	canQueue: boolean;
-	canOpen: boolean;
 	checkouts: Map<string, Checkout>;
-	active: boolean;
-	helpOpen: boolean;
 	showArchived: boolean;
-	onMove: (id: string) => void;
-	onOpen: (pr: PR) => void;
-	onToggleArchived: () => void;
+	/** Reports how many rows fit, for half-page motions. */
+	onHeight: (rows: number) => void;
 };
 
-export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, checkouts, active, helpOpen, showArchived, onMove, onOpen, onToggleArchived}: Props) {
+export function ListScreen({tabs, tab, view, checkouts, showArchived, onHeight}: Props) {
 	const listRef = useRef<DOMElement>(null);
 	const [listHeight, setListHeight] = useState(10);
 	useEffect(() => {
@@ -35,30 +25,7 @@ export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, 
 	});
 	const {rows, cursor} = view;
 	const height = Math.max(1, listHeight - 2);
-
-	useInput(
-		(input, key) => {
-			const go = (motion: Motion) => {
-				const id = move(view, motion, height);
-				if (id) onMove(id);
-			};
-			if (key.ctrl && input === 'u') return go('halfUp');
-			if (key.ctrl && input === 'd') return go('halfDown');
-			if (key.ctrl) return;
-			if (key.upArrow || input === 'k') go('up');
-			if (key.downArrow || input === 'j') go('down');
-			if (input === 'g') go('top');
-			if (input === 'G') go('bottom');
-			if (key.return) {
-				if (cursor === ARCHIVED_TOGGLE) onToggleArchived();
-				else if (focused) onOpen(focused);
-			}
-			const tabIndex = tabs.findIndex(t => t.repo === tab);
-			if (key.rightArrow || input === 'l' || (key.tab && !key.shift)) onTab(tabs[(tabIndex + 1) % tabs.length].repo);
-			if (key.leftArrow || input === 'h' || (key.tab && key.shift)) onTab(tabs[(tabIndex - 1 + tabs.length) % tabs.length].repo);
-		},
-		{isActive: active},
-	);
+	useEffect(() => onHeight(height), [height]);
 
 	const repoLabels = new Map(tabs.flatMap(t => (t.repo ? [[t.repo, t.label] as const] : [])));
 	const repoWidth = tab ? 0 : Math.min(24, Math.max(...[...repoLabels.values()].map(l => l.length))) + 2;
@@ -122,20 +89,6 @@ export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, 
 				})}
 				{start + height < rows.length && <Text dimColor>  ↓ {rows.length - start - height} more</Text>}
 			</Box>
-			{helpOpen && (
-				<KeyHelp
-					items={[
-						{key: '↑/↓ j/k', label: 'move'},
-						{key: 'g/G', label: 'top / bottom'},
-						{key: 'ctrl+u/d', label: 'half a screen up / down'},
-						{key: '←/→ h/l', label: 'switch repo tab'},
-						{key: 'enter', label: cursor === ARCHIVED_TOGGLE ? 'expand archived' : 'PR details'},
-						...prActions(focused, canQueue, canOpen),
-						{key: 'R', label: 'refresh'},
-						{key: 'q', label: inTmuxPopup ? 'hide popup' : 'quit'},
-					]}
-				/>
-			)}
 		</Box>
 	);
 }

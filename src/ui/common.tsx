@@ -1,6 +1,7 @@
 import React, {useEffect, useState} from 'react';
 import {Box, Text, useStdout} from 'ink';
 import type {PR} from '../github.js';
+import type {KeyItem} from '../keymap.js';
 
 function readableOn(hex: string) {
 	const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
@@ -19,9 +20,6 @@ export function Labels({pr}: {pr: PR}) {
 	);
 }
 
-export type KeyItem = {key: string; label: string; enabled?: boolean};
-
-/** Key list drawn over its parent, which must fill the screen. Every cell is written so nothing shows through. */
 export function KeyHelp({items}: {items: KeyItem[]}) {
 	const footer = 'esc close';
 	const keyWidth = Math.max(...items.map(i => i.key.length));
@@ -33,7 +31,7 @@ export function KeyHelp({items}: {items: KeyItem[]}) {
 				<Text bold>{line('Keys')}</Text>
 				<Text>{line('')}</Text>
 				{items.map(i => {
-					const disabled = i.enabled === false;
+					const disabled = !i.enabled;
 					return (
 						<Text key={i.key}>
 							{' '}
@@ -53,17 +51,6 @@ export function KeyHelp({items}: {items: KeyItem[]}) {
 			</Box>
 		</Box>
 	);
-}
-
-export function prActions(pr: PR | undefined, ready: boolean, canOpen: boolean): KeyItem[] {
-	return [
-		{key: 'w', label: 'open PR in browser', enabled: !!pr},
-		{key: 'o', label: 'open tmux session for local checkout', enabled: canOpen},
-		{key: 'm', label: 'queue via GitQueue', enabled: ready},
-		{key: 't', label: 'toggle tunnel-review-vision', enabled: !!pr},
-		{key: 'b', label: 'toggle in-review', enabled: !!pr},
-		{key: 'a', label: 'archive / unarchive', enabled: !!pr},
-	];
 }
 
 export function useTerminalSize() {

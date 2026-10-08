@@ -5,10 +5,11 @@ import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sessionName} from '../t
 import {currentBranch, findBranchPr} from '../git.js';
 import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
 import {fetchAll, type PR} from '../github.js';
-import {listView, toggleArchived} from '../listModel.js';
+import {keyHelp, resolveKey, type Command, type KeyContext} from '../keymap.js';
+import {ARCHIVED_TOGGLE, listView, move, toggleArchived} from '../listModel.js';
 import {archivedPrs, lastTab, prCache} from '../store.js';
-import {IN_REVIEW_LABEL, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
-import {Spinner, useTerminalSize} from './common.js';
+import {failingChecks, hasLabel} from '../status.js';
+import {KeyHelp, Spinner, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
 import {ListScreen} from './ListScreen.js';
 import {buildTabs} from './TabBar.js';
@@ -58,6 +59,8 @@ export function App({all}: {all: boolean}) {
 	const [message, setMessage] = useState<Message | null>(null);
 	const [confirm, setConfirm] = useState<PR | null>(null);
 	const [checkouts, setCheckouts] = useState<Checkout[] | null>(null);
+	const [listHeight, setListHeight] = useState(10);
+	const [checkIndex, setCheckIndex] = useState(0);
 
 	const flash = (text: string, color = 'green') => setMessage({text, color});
 
@@ -133,7 +136,6 @@ export function App({all}: {all: boolean}) {
 	const view = useMemo(() => listView(mine, listOptions, cursor), [mine, listOptions, cursor]);
 
 	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...mine, current] : mine, checkouts ?? []), [mine, current, checkouts]);
-	const canOpen = (pr: PR | undefined) => inTmux && !!pr && checkoutMap.has(pr.url);
 
 	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
 	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? mine.find(p => p.url === view.cursor) : undefined;
@@ -179,19 +181,71 @@ export function App({all}: {all: boolean}) {
 		flash(next.archived.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
 	};
 
-	const openCheckout = (pr: PR) => {
-		const checkout = checkoutMap.get(pr.url);
-		if (!inTmux) return flash('Not running inside tmux', 'gray');
-		if (!checkout) return flash(checkouts ? `No checkout of ${pr.headRef} in ~/Projects` : 'Still looking for local checkouts…', 'gray');
-		const name = sessionName(checkout.dir);
-		flash(`Opening ${name}…`, 'yellow');
-		openSession(checkout.dir).then(
-			() => flash(`Switched to ${name}`),
-			e => flash(errorText(e), 'red'),
-		);
+	const failing = detailPr ? failingChecks(detailPr) : [];
+	const keyContext: KeyContext = {
+		screen: screen.kind,
+		pr: focused,
+		onArchivedToggle: screen.kind === 'list' && view.cursor === ARCHIVED_TOGGLE,
+		showArchived,
+		failingChecks: failing,
+		selectedCheck: failing[Math.min(checkIndex, failing.length - 1)],
+		fresh,
+		tmux: inTmuxPopup ? 'popup' : inTmux ? 'pane' : 'none',
+		checkout: focused && checkoutMap.get(focused.url),
+		scanning: checkouts === null,
 	};
 
-	const canQueue = (pr: PR | undefined) => !!pr && fresh && statusOf(pr) === 'ready';
+	const run = (command: Command) => {
+		switch (command.type) {
+			case 'move': {
+				const id = move(view, command.motion, listHeight);
+				if (id) setCursor(id);
+				return;
+			}
+			case 'selectCheck': {
+				const last = Math.max(0, failing.length - 1);
+				const index = Math.min(checkIndex, last);
+				const next = {up: index - 1, down: index + 1, top: 0, bottom: last}[command.motion];
+				return setCheckIndex(Math.max(0, Math.min(last, next)));
+			}
+			case 'tab': {
+				const index = tabs.findIndex(t => t.repo === activeTab);
+				const repo = tabs[(index + command.delta + tabs.length) % tabs.length].repo;
+				setTab(repo);
+				return lastTab.save(repo);
+			}
+			case 'toggleArchivedSection':
+				return setShowArchived(s => !s);
+			case 'openDetail':
+				setCheckIndex(0);
+				return setScreen({kind: 'detail', url: command.pr.url});
+			case 'openCheck':
+				return openUrl(command.url);
+			case 'back':
+				return setScreen({kind: 'list'});
+			case 'quit':
+				return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
+			case 'refresh':
+				scan();
+				return void load();
+			case 'openPr':
+				return openUrl(command.pr.url);
+			case 'openSession': {
+				const name = sessionName(command.checkout.dir);
+				flash(`Opening ${name}…`, 'yellow');
+				return void openSession(command.checkout.dir).then(
+					() => flash(`Switched to ${name}`),
+					e => flash(errorText(e), 'red'),
+				);
+			}
+			case 'confirmQueue':
+				return setConfirm(command.pr);
+			case 'toggleLabel':
+				return void toggleLabel(command.pr, command.label);
+			case 'toggleArchive':
+				return toggleArchive(command.pr);
+		}
+	};
 
 	useInput((input, key) => {
 		hasInteracted.current = true;
@@ -205,23 +259,10 @@ export function App({all}: {all: boolean}) {
 			if (key.escape || input === '?') setHelpOpen(false);
 			return;
 		}
-		if (input === '?' && (screen.kind === 'detail' || mine.length)) return setHelpOpen(true);
-		if (key.ctrl) return;
-		if (input === 'q' || (key.escape && screen.kind === 'list')) return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
-		if (input === 'R') {
-			scan();
-			return void load();
-		}
-		if (!focused) return;
-		if (input === 'w') openUrl(focused.url);
-		if (input === 'o') openCheckout(focused);
-		if (input === 't') toggleLabel(focused, TUNNEL_LABEL);
-		if (input === 'b') toggleLabel(focused, IN_REVIEW_LABEL);
-		if (input === 'a') toggleArchive(focused);
-		if (input === 'm') {
-			if (canQueue(focused)) setConfirm(focused);
-			else flash(fresh ? 'Not ready to merge' : 'Wait for fresh data before queueing', 'gray');
-		}
+		if (input === '?') return setHelpOpen(true);
+		const result = resolveKey(keyContext, {...key, input});
+		if (result?.type === 'unavailable') flash(result.reason, 'gray');
+		else if (result) run(result);
 	});
 
 	return (
@@ -230,14 +271,8 @@ export function App({all}: {all: boolean}) {
 				<DetailScreen
 					key={detailPr.url}
 					pr={detailPr}
-					canQueue={canQueue(detailPr)}
-					canOpen={canOpen(detailPr)}
 					checkout={checkoutMap.get(detailPr.url)}
-					active={!confirm && !helpOpen}
-					helpOpen={helpOpen}
-					onBack={() => setScreen({kind: 'list'})}
-					onRetry={() => flash('Retry is coming in phase 2', 'gray')}
-					onMissingLink={() => flash('This check has no details link', 'gray')}
+					selectedCheck={checkIndex}
 				/>
 			) : !loading && mine.length === 0 ? (
 				<Text dimColor>No open PRs 🎉</Text>
@@ -245,21 +280,10 @@ export function App({all}: {all: boolean}) {
 				<ListScreen
 					tabs={tabs}
 					tab={activeTab}
-					onTab={repo => {
-						setTab(repo);
-						lastTab.save(repo);
-					}}
 					view={view}
-					focused={focused}
-					canQueue={canQueue(focused)}
-					canOpen={canOpen(focused)}
 					checkouts={checkoutMap}
-					active={!confirm && !helpOpen}
-					helpOpen={helpOpen}
 					showArchived={showArchived}
-					onMove={setCursor}
-					onOpen={pr => setScreen({kind: 'detail', url: pr.url})}
-					onToggleArchived={() => setShowArchived(s => !s)}
+					onHeight={setListHeight}
 				/>
 			)}
 
@@ -292,6 +316,7 @@ export function App({all}: {all: boolean}) {
 				</Box>
 				<Text dimColor> ? keys</Text>
 			</Box>
+			{helpOpen && <KeyHelp items={keyHelp(keyContext)} />}
 		</Box>
 	);
 }

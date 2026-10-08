@@ -1,13 +1,11 @@
 import {homedir} from 'node:os';
-import React, {useState} from 'react';
-import {Box, Text, useInput} from 'ink';
-import {openUrl} from '../actions.js';
-import {inTmuxPopup} from '../tmux.js';
+import React from 'react';
+import {Box, Text} from 'ink';
 import type {BotItem} from '../botReview.js';
 import type {Checkout} from '../checkouts.js';
 import type {PR} from '../github.js';
-import {STATUS_META, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
-import {KeyHelp, Labels, prActions} from './common.js';
+import {STATUS_META, TUNNEL_LABEL, failingChecks, hasLabel, statusOf} from '../status.js';
+import {Labels} from './common.js';
 
 const SEVERITY: Record<BotItem['severity'], {label: string; color: string}> = {
 	critical: {label: '🔴 critical', color: 'red'},
@@ -17,40 +15,15 @@ const SEVERITY: Record<BotItem['severity'], {label: string; color: string}> = {
 
 type Props = {
 	pr: PR;
-	canQueue: boolean;
-	canOpen: boolean;
 	checkout: Checkout | undefined;
-	active: boolean;
-	helpOpen: boolean;
-	onBack: () => void;
-	onRetry: () => void;
-	onMissingLink: () => void;
+	selectedCheck: number;
 };
 
-export function DetailScreen({pr, canQueue, canOpen, checkout, active, helpOpen, onBack, onRetry, onMissingLink}: Props) {
-	const failing = pr.requiredChecks.filter(c => c.state === 'failing');
+export function DetailScreen({pr, checkout, selectedCheck}: Props) {
+	const failing = failingChecks(pr);
 	const running = pr.requiredChecks.filter(c => c.state === 'pending');
 	const passed = pr.requiredChecks.filter(c => c.state === 'passed');
-	const [cursor, setCursor] = useState(0);
-	const selected = Math.min(cursor, failing.length - 1);
-
-	useInput(
-		(input, key) => {
-			if (key.escape) onBack();
-			if (key.ctrl) return;
-			if (key.upArrow || input === 'k') setCursor(Math.max(0, selected - 1));
-			if (key.downArrow || input === 'j') setCursor(Math.min(failing.length - 1, selected + 1));
-			if (input === 'g') setCursor(0);
-			if (input === 'G') setCursor(Math.max(0, failing.length - 1));
-			if (key.return && failing[selected]) {
-				const url = failing[selected].url;
-				if (url) openUrl(url);
-				else onMissingLink();
-			}
-			if (input === 'r' && failing.length) onRetry();
-		},
-		{isActive: active},
-	);
+	const selected = Math.min(selectedCheck, failing.length - 1);
 
 	const status = statusOf(pr);
 	const meta = STATUS_META[status];
@@ -155,23 +128,6 @@ export function DetailScreen({pr, canQueue, canOpen, checkout, active, helpOpen,
 				</Box>
 
 			</Box>
-			{helpOpen && (
-				<KeyHelp
-					items={[
-						...(failing.length
-							? [
-									{key: '↑/↓ j/k', label: 'select failing check'},
-									{key: 'enter', label: 'open check in browser'},
-									{key: 'r', label: 'retry check', enabled: false},
-								]
-							: []),
-						...prActions(pr, canQueue, canOpen),
-						{key: 'esc', label: 'back to list'},
-						{key: 'R', label: 'refresh'},
-						{key: 'q', label: inTmuxPopup ? 'hide popup' : 'quit'},
-					]}
-				/>
-			)}
 		</Box>
 	);
 }

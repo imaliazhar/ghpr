@@ -16,6 +16,8 @@ export const STATUS_META: Record<Status, {icon: string; label: string; color: st
 export const TUNNEL_LABEL = 'tunnel-review-vision';
 export const IN_REVIEW_LABEL = 'in-review';
 
+export const failingChecks = (pr: PR) => pr.requiredChecks.filter(c => c.state === 'failing');
+
 export const hasLabel = (pr: PR, name: string) => pr.labels.some(l => l.name === name);
 
 export function statusOf(pr: PR): Status {
