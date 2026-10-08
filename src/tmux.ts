@@ -17,34 +17,44 @@ export function hideTmuxPopup(onFailure: () => void) {
 
 export const sessionName = (dir: string) => basename(dir).replaceAll('.', '_');
 
-const tmux = async (args: string[]) => (await run('tmux', args)).stdout;
+/** What `openSession` needs from tmux and the environment. */
+export type TmuxEnv = {
+	run: (args: string[]) => Promise<string>;
+	popupSession: string | undefined;
+	editor: string | undefined;
+};
+
+const defaultEnv: TmuxEnv = {
+	run: async args => (await run('tmux', args)).stdout,
+	popupSession,
+	editor: process.env.EDITOR,
+};
 
 /** The most recently active client outside the popup session, which the popup was opened from. */
-async function outerClient() {
-	const clients = (await tmux(['list-clients', '-F', '#{client_activity} #{session_name} #{client_name}']))
+async function outerClient(env: TmuxEnv) {
+	const clients = (await env.run(['list-clients', '-F', '#{client_activity} #{session_name} #{client_name}']))
 		.trim()
 		.split('\n')
 		.map(line => line.split(' '))
-		.filter(([, session]) => session !== popupSession)
+		.filter(([, session]) => session !== env.popupSession)
 		.sort(([a], [b]) => Number(b) - Number(a));
 	return clients[0]?.[2];
 }
 
 /**
- * Switches to the tmux session for `dir`, creating it with $EDITOR open if it doesn't exist.
+ * Switches to the tmux session for `dir`, creating it with the editor open if it doesn't exist.
  * From the popup, it switches the client the popup was opened from and hides the popup.
  */
-export async function openSession(dir: string) {
+export async function openSession(dir: string, env: TmuxEnv = defaultEnv) {
 	const name = sessionName(dir);
-	const exists = await tmux(['has-session', '-t', `=${name}`]).then(() => true, () => false);
+	const exists = await env.run(['has-session', '-t', `=${name}`]).then(() => true, () => false);
 	if (!exists) {
-		const editor = process.env.EDITOR;
-		await tmux(['new-session', '-d', '-s', name, '-c', dir, ...(editor ? ['-n', editor] : [])]);
-		if (editor) await tmux(['send-keys', '-t', `=${name}:`, editor, 'Enter']);
+		await env.run(['new-session', '-d', '-s', name, '-c', dir, ...(env.editor ? ['-n', env.editor] : [])]);
+		if (env.editor) await env.run(['send-keys', '-t', `=${name}:`, env.editor, 'Enter']);
 	}
-	if (!inTmuxPopup) return void (await tmux(['switch-client', '-t', `=${name}`]));
-	const client = await outerClient();
+	if (!env.popupSession) return void (await env.run(['switch-client', '-t', `=${name}`]));
+	const client = await outerClient(env);
 	if (!client) throw new Error('No tmux client to switch');
-	await tmux(['switch-client', '-c', client, '-t', `=${name}`]);
-	hideTmuxPopup(() => {});
+	await env.run(['switch-client', '-c', client, '-t', `=${name}`]);
+	await env.run(['detach-client', '-s', `=${env.popupSession}`]).catch(() => {});
 }
