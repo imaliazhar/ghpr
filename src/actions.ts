@@ -26,12 +26,3 @@ export async function queueForMerge(pr: PR) {
 export async function setLabel(pr: PR, label: string, on: boolean) {
 	await track(gh(['pr', 'edit', String(pr.number), '-R', pr.repo, on ? '--add-label' : '--remove-label', label]));
 }
-
-const popupSession = process.env.TMUX_PANE ? process.env.GHPR_POPUP : undefined;
-
-export const inTmuxPopup = !!popupSession;
-
-/** Detaches the clients of the popup's dedicated session, named by GHPR_POPUP. */
-export function hideTmuxPopup(onFailure: () => void) {
-	execFile('tmux', ['detach-client', '-s', `=${popupSession}`], error => error && onFailure());
-}

@@ -42,9 +42,10 @@ export function Footer({items}: {items: FooterItem[]}) {
 	);
 }
 
-export function prActions(pr: PR | undefined, ready: boolean): FooterItem[] {
+export function prActions(pr: PR | undefined, ready: boolean, canOpen: boolean): FooterItem[] {
 	return [
 		{key: 'w', label: 'open PR', enabled: !!pr},
+		{key: 'o', label: 'session', enabled: canOpen},
 		{key: 'm', label: 'queue', enabled: ready},
 		{key: 't', label: 'tunnel', enabled: !!pr},
 		{key: 'b', label: 'in-review', enabled: !!pr},

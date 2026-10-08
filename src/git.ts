@@ -6,11 +6,11 @@ const run = promisify(execFile);
 
 export type Branch = {owner: string; name: string; branch: string};
 
-export async function currentBranch(): Promise<Branch | null> {
+export async function currentBranch(cwd?: string): Promise<Branch | null> {
 	try {
 		const [remote, branch] = await Promise.all([
-			run('git', ['remote', 'get-url', 'origin']),
-			run('git', ['branch', '--show-current']),
+			run('git', ['remote', 'get-url', 'origin'], {cwd}),
+			run('git', ['branch', '--show-current'], {cwd}),
 		]);
 		const match = remote.stdout.trim().match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
 		const name = branch.stdout.trim();
@@ -20,5 +20,7 @@ export async function currentBranch(): Promise<Branch | null> {
 	}
 }
 
-export const findBranchPr = (prs: PR[], branch: Branch) =>
-	prs.find(p => p.repo.toLowerCase() === `${branch.owner}/${branch.name}`.toLowerCase() && p.headRef === branch.branch) ?? null;
+export const isBranchOf = (pr: PR, branch: Branch) =>
+	pr.repo.toLowerCase() === `${branch.owner}/${branch.name}`.toLowerCase() && pr.headRef === branch.branch;
+
+export const findBranchPr = (prs: PR[], branch: Branch) => prs.find(p => isBranchOf(p, branch)) ?? null;

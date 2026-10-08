@@ -43,6 +43,10 @@ PRs are grouped by status, most actionable first:
 
 Only required checks count. Archived PRs sit collapsed at the bottom.
 
+## Local checkouts
+
+ghpr looks through the git repos directly under `~/Projects` in the background, and marks PRs whose branch is checked out in one with `⌂`. Inside tmux, `o` switches to that checkout's session, named after its folder with `.` replaced by `_`. If the session doesn't exist, ghpr creates it in the folder and opens `$EDITOR`. In [tmux popup mode](#tmux-popup), `o` switches the client the popup was opened from, then hides the popup.
+
 ## Keys
 
 | Key | Action |
@@ -53,6 +57,7 @@ Only required checks count. Archived PRs sit collapsed at the bottom.
 | `←/→` `h/l` `tab` | Switch repo tab |
 | `enter` | Open PR details / open the selected failing check |
 | `w` | Open the PR in the browser |
+| `o` | Switch to the tmux session for the PR's local checkout, creating it if needed |
 | `m` | Queue via GitQueue (`/gitqueue add normal`), only when ready |
 | `t` | Toggle the `tunnel-review-vision` label |
 | `b` | Toggle the `in-review` label |

@@ -1,7 +1,9 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Box, Text, useApp, useInput} from 'ink';
-import {hideTmuxPopup, inTmuxPopup, openUrl, queueForMerge, setLabel} from '../actions.js';
+import {openUrl, queueForMerge, setLabel} from '../actions.js';
+import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sessionName} from '../tmux.js';
 import {currentBranch, findBranchPr, type Branch} from '../git.js';
+import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
 import {fetchAll, type PR} from '../github.js';
 import {listView, toggleArchived} from '../listModel.js';
 import {archivedPrs, lastTab, prCache} from '../store.js';
@@ -45,6 +47,7 @@ export function App({all}: {all: boolean}) {
 	const [note, setNote] = useState<string | null>(null);
 	const [message, setMessage] = useState<Message | null>(null);
 	const [confirm, setConfirm] = useState<PR | null>(null);
+	const [checkouts, setCheckouts] = useState<Checkout[] | null>(null);
 
 	const flash = (text: string, color = 'green') => setMessage({text, color});
 
@@ -106,12 +109,21 @@ export function App({all}: {all: boolean}) {
 		load();
 	}, [load]);
 
+	const scan = useCallback(() => {
+		scanCheckouts().then(setCheckouts);
+	}, []);
+
+	useEffect(scan, [scan]);
+
 	const findPr = (url: string) => mine.find(p => p.url === url) ?? (current?.url === url ? current : undefined);
 
 	const tabs = useMemo(() => buildTabs(mine, archived), [mine, archived]);
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
 	const listOptions = useMemo(() => ({tab: activeTab, archived, showArchived}), [activeTab, archived, showArchived]);
 	const view = useMemo(() => listView(mine, listOptions, cursor), [mine, listOptions, cursor]);
+
+	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...mine, current] : mine, checkouts ?? []), [mine, current, checkouts]);
+	const canOpen = (pr: PR | undefined) => inTmux && !!pr && checkoutMap.has(pr.url);
 
 	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
 	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? mine.find(p => p.url === view.cursor) : undefined;
@@ -157,6 +169,18 @@ export function App({all}: {all: boolean}) {
 		flash(next.archived.has(pr.url) ? `Archived ${pr.repo}#${pr.number}` : `Unarchived ${pr.repo}#${pr.number}`);
 	};
 
+	const openCheckout = (pr: PR) => {
+		const checkout = checkoutMap.get(pr.url);
+		if (!inTmux) return flash('Not running inside tmux', 'gray');
+		if (!checkout) return flash(checkouts ? `No checkout of ${pr.headRef} in ~/Projects` : 'Still looking for local checkouts…', 'gray');
+		const name = sessionName(checkout.dir);
+		flash(`Opening ${name}…`, 'yellow');
+		openSession(checkout.dir).then(
+			() => flash(`Switched to ${name}`),
+			e => flash(errorText(e), 'red'),
+		);
+	};
+
 	const canQueue = (pr: PR | undefined) => !!pr && fresh && statusOf(pr) === 'ready';
 
 	useInput((input, key) => {
@@ -169,9 +193,13 @@ export function App({all}: {all: boolean}) {
 		}
 		if (key.ctrl) return;
 		if (input === 'q' || (key.escape && screen.kind === 'list')) return inTmuxPopup ? hideTmuxPopup(() => exit()) : exit();
-		if (input === 'R') return void load();
+		if (input === 'R') {
+			scan();
+			return void load();
+		}
 		if (!focused) return;
 		if (input === 'w') openUrl(focused.url);
+		if (input === 'o') openCheckout(focused);
 		if (input === 't') toggleLabel(focused, TUNNEL_LABEL);
 		if (input === 'b') toggleLabel(focused, IN_REVIEW_LABEL);
 		if (input === 'a') toggleArchive(focused);
@@ -202,6 +230,8 @@ export function App({all}: {all: boolean}) {
 					pr={detailPr}
 					archived={archived.has(detailPr.url)}
 					canQueue={canQueue(detailPr)}
+					canOpen={canOpen(detailPr)}
+					checkout={checkoutMap.get(detailPr.url)}
 					active={!confirm}
 					onBack={() => {
 						setNote(null);
@@ -223,6 +253,8 @@ export function App({all}: {all: boolean}) {
 					view={view}
 					focused={focused}
 					canQueue={canQueue(focused)}
+					canOpen={canOpen(focused)}
+					checkouts={checkoutMap}
 					active={!confirm}
 					showArchived={showArchived}
 					onMove={setCursor}

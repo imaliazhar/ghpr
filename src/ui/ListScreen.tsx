@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Box, Text, measureElement, useInput, type DOMElement} from 'ink';
-import {inTmuxPopup} from '../actions.js';
+import {inTmuxPopup} from '../tmux.js';
+import type {Checkout} from '../checkouts.js';
 import type {PR} from '../github.js';
 import {ARCHIVED_TOGGLE, move, rowId, type ListView, type Motion} from '../listModel.js';
 import {STATUS_META, statusOf} from '../status.js';
@@ -14,6 +15,8 @@ type Props = {
 	view: ListView;
 	focused: PR | undefined;
 	canQueue: boolean;
+	canOpen: boolean;
+	checkouts: Map<string, Checkout>;
 	active: boolean;
 	showArchived: boolean;
 	onMove: (id: string) => void;
@@ -21,7 +24,7 @@ type Props = {
 	onToggleArchived: () => void;
 };
 
-export function ListScreen({tabs, tab, onTab, view, focused, canQueue, active, showArchived, onMove, onOpen, onToggleArchived}: Props) {
+export function ListScreen({tabs, tab, onTab, view, focused, canQueue, canOpen, checkouts, active, showArchived, onMove, onOpen, onToggleArchived}: Props) {
 	const listRef = useRef<DOMElement>(null);
 	const [listHeight, setListHeight] = useState(10);
 	useEffect(() => {
@@ -91,9 +94,14 @@ export function ListScreen({tabs, tab, onTab, view, focused, canQueue, active, s
 					return (
 						<Box key={key}>
 							<Text color="cyan">{isSel ? '❯ ' : '  '}</Text>
-							<Box width={3} flexShrink={0}>
+							<Box width={2} flexShrink={0}>
 								<Text color={meta.color} dimColor={row.archived}>
 									{meta.icon}
+								</Text>
+							</Box>
+							<Box width={2} flexShrink={0}>
+								<Text color="cyan" dimColor>
+									{checkouts.has(row.pr.url) ? '⌂' : ' '}
 								</Text>
 							</Box>
 							{repoWidth > 0 && (
@@ -120,7 +128,7 @@ export function ListScreen({tabs, tab, onTab, view, focused, canQueue, active, s
 					{key: 'g/G', label: 'top/bottom'},
 					{key: '←/→', label: 'repo'},
 					{key: 'enter', label: cursor === ARCHIVED_TOGGLE ? 'expand' : 'details'},
-					...prActions(focused, canQueue),
+					...prActions(focused, canQueue, canOpen),
 					{key: 'R', label: 'refresh'},
 					{key: 'q', label: inTmuxPopup ? 'hide' : 'quit'},
 				]}

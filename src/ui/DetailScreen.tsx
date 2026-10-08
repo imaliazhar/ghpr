@@ -1,7 +1,10 @@
+import {homedir} from 'node:os';
 import React, {useState} from 'react';
 import {Box, Text, useInput} from 'ink';
-import {inTmuxPopup, openUrl} from '../actions.js';
+import {openUrl} from '../actions.js';
+import {inTmuxPopup} from '../tmux.js';
 import type {BotItem} from '../botReview.js';
+import type {Checkout} from '../checkouts.js';
 import type {PR} from '../github.js';
 import {STATUS_META, TUNNEL_LABEL, hasLabel, statusOf} from '../status.js';
 import {Footer, Labels, Tags, prActions} from './common.js';
@@ -16,13 +19,15 @@ type Props = {
 	pr: PR;
 	archived: boolean;
 	canQueue: boolean;
+	canOpen: boolean;
+	checkout: Checkout | undefined;
 	active: boolean;
 	onBack: () => void;
 	onRetry: () => void;
 	onMissingLink: () => void;
 };
 
-export function DetailScreen({pr, archived, canQueue, active, onBack, onRetry, onMissingLink}: Props) {
+export function DetailScreen({pr, archived, canQueue, canOpen, checkout, active, onBack, onRetry, onMissingLink}: Props) {
 	const failing = pr.requiredChecks.filter(c => c.state === 'failing');
 	const running = pr.requiredChecks.filter(c => c.state === 'pending');
 	const passed = pr.requiredChecks.filter(c => c.state === 'passed');
@@ -71,6 +76,11 @@ export function DetailScreen({pr, archived, canQueue, active, onBack, onRetry, o
 					<Text dimColor>{pr.headRef}</Text>
 					<Labels pr={pr} />
 				</Box>
+				{checkout && (
+					<Text color="cyan" dimColor>
+						⌂ {checkout.dir.replace(homedir(), '~')}
+					</Text>
+				)}
 
 				{hasLabel(pr, TUNNEL_LABEL) && (
 					<Box marginTop={1}>
@@ -156,7 +166,7 @@ export function DetailScreen({pr, archived, canQueue, active, onBack, onRetry, o
 								{key: 'r', label: 'retry', enabled: false},
 							]
 						: []),
-					...prActions(pr, canQueue),
+					...prActions(pr, canQueue, canOpen),
 					{key: 'esc', label: 'back'},
 					{key: 'R', label: 'refresh'},
 					{key: 'q', label: inTmuxPopup ? 'hide' : 'quit'},
