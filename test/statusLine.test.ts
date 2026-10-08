@@ -46,5 +46,6 @@ describe('statusLine', () => {
 	test('shows the message being written for claude', () => {
 		const checkout = {owner: 'acme', name: 'app', branch: 'b', dir: '/p/my.app'};
 		assert.equal(text({mode: {kind: 'compose', checkout, text: 'hi'}}), 'claude@my_app ❯ hi   enter sends · esc cancels');
+		assert.equal(text({mode: {kind: 'compose', checkout, text: 'a\nb'}}), 'claude@my_app ❯ a ↵ b   enter sends · esc cancels');
 	});
 });

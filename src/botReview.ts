@@ -43,6 +43,15 @@ function dedent(lines: string[]) {
 	return lines.map(l => l.slice(Number.isFinite(indent) ? indent : 0).trimEnd());
 }
 
+function decodeScore(text: string) {
+	try {
+		return decodeURIComponent(text);
+	} catch {
+		return text;
+	}
+}
+
+/** Reads the bot's review comment. Never throws; a `<details>` block left open ends at the next heading. */
 export function parseBotReview(body: string): BotReview {
 	const outcome = /Review outcome \| 🔴/.test(body) ? 'changes' : /^✅ Approved/m.test(body) ? 'approved' : 'unknown';
 
@@ -68,10 +77,11 @@ export function parseBotReview(body: string): BotReview {
 		}
 		if (inDetails) {
 			if (text.startsWith('</details>')) inDetails = false;
-			continue;
+			if (!line.startsWith('#')) continue;
+			inDetails = false;
 		}
 		if (text.startsWith('- <details>') || text.startsWith('<details>')) {
-			inDetails = true;
+			inDetails = !text.includes('</details>');
 			continue;
 		}
 
@@ -81,7 +91,7 @@ export function parseBotReview(body: string): BotReview {
 			current = null;
 			if (section.startsWith('Implementation Strategy')) {
 				const score = section.match(/Score&message=([^&"]+)/);
-				strategy = {score: score ? decodeURIComponent(score[1]) : null, summary: ''};
+				strategy = {score: score ? decodeScore(score[1]) : null, summary: ''};
 			}
 			continue;
 		}

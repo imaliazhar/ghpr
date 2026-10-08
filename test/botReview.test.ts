@@ -94,4 +94,15 @@ describe('parseBotReview', () => {
 		const general = parseBotReview(body.replace(/## File-by-file Feedback[\s\S]*?## Actions/, '## Actions'));
 		assert.equal(general.items[0].summary, 'Selecting a web radio passes an event instead of its value.');
 	});
+
+	test('a <details> block on one line, or left open, hides nothing after it', () => {
+		const oneLine = parseBotReview(body.replace(/  - <details>[\s\S]*?<\/details>/, '  - <details><summary>Why</summary>text</details>'));
+		assert.deepEqual(oneLine.items, review.items);
+		const unclosed = parseBotReview(body.replace('    </details>\n', ''));
+		assert.deepEqual(unclosed.items, review.items);
+	});
+
+	test('keeps a score with a stray % as written', () => {
+		assert.equal(parseBotReview(body.replace('3.6%2F5%20Good', '80%')).strategy?.score, '80%');
+	});
 });

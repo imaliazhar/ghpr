@@ -1,8 +1,7 @@
 import {access, readdir} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
-import {currentBranch, isBranchOf, type Branch} from './git.js';
-import type {PR} from './github.js';
+import {currentBranch, type Branch} from './git.js';
 
 export const PROJECTS_DIR = join(homedir(), 'Projects');
 
@@ -26,14 +25,4 @@ export async function scanCheckouts(root = PROJECTS_DIR): Promise<Checkout[]> {
 	};
 	await Promise.all(Array.from({length: CONCURRENCY}, worker));
 	return found.sort((a, b) => a.dir.localeCompare(b.dir));
-}
-
-/** Maps each PR url to the first checkout on its branch. */
-export function checkoutsByPr(prs: PR[], checkouts: Checkout[]): Map<string, Checkout> {
-	return new Map(
-		prs.flatMap(pr => {
-			const checkout = checkouts.find(c => isBranchOf(pr, c));
-			return checkout ? [[pr.url, checkout] as const] : [];
-		}),
-	);
 }

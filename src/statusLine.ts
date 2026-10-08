@@ -40,7 +40,7 @@ export function statusLine(s: StatusInput): Span[] {
 	if (s.mode.kind === 'compose') {
 		return [
 			{text: `claude@${sessionName(s.mode.checkout.dir)} ❯ `, color: 'magenta'},
-			{text: s.mode.text},
+			{text: s.mode.text.replaceAll('\n', ' ↵ ')},
 			{text: ' ', inverse: true},
 			{text: '  enter sends · esc cancels', dim: true},
 		];

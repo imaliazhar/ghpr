@@ -1,7 +1,8 @@
 import {basename} from 'node:path';
 import type {Checkout} from './checkouts.js';
 import type {PR} from './github.js';
-import {keyHelp, resolveKey, type Command, type KeyContext, type KeyItem, type KeyPress} from './keymap.js';
+import {keyHelp, resolveKey, type Command, type KeyContext, type KeyItem} from './keymap.js';
+import {editLine, type LineKey} from './lineEdit.js';
 import {leapKey, startLeap, type Leap} from './leap.js';
 import type {ListView} from './listModel.js';
 import {nextMatch, typeSearch} from './search.js';
@@ -30,10 +31,10 @@ export type Effect =
 	| Exclude<Command, {type: 'search' | 'leap' | 'confirmQueue' | 'confirmCleanup' | 'clearSearch' | 'cycleMatch' | 'composeClaude'}>
 	| {type: 'setCursor'; id: string | null}
 	| {type: 'queue'; pr: PR}
-	| {type: 'cleanup'; pr: PR; checkout: Checkout}
+	| {type: 'cleanup'; pr: PR; checkout: Checkout; discard?: boolean}
 	| {type: 'flash'; text: string; color: string};
 
-export type InputKey = KeyPress & {backspace?: boolean; delete?: boolean};
+export type InputKey = LineKey;
 
 type Result = {state: InputState; effects: Effect[]};
 
@@ -46,6 +47,14 @@ const confirm = (state: InputState, prompt: string, effect: Effect): Result => (
 	state: {...state, mode: {kind: 'confirm', prompt, effect}},
 	effects: [],
 });
+/** Asks again to clean up `checkout`, throwing away its uncommitted changes. */
+export const confirmDiscard = (state: InputState, pr: PR, checkout: Checkout): InputState =>
+	confirm(state, `${basename(checkout.dir)} has uncommitted changes. Discard them and clean up anyway? (y/n)`, {
+		type: 'cleanup',
+		pr,
+		checkout,
+		discard: true,
+	}).state;
 const flash = (text: string, color = 'gray'): Effect => ({type: 'flash', text, color});
 const normal = (state: InputState, effects: Effect[] = [], query = state.query): Result => ({
 	state: {mode: {kind: 'normal'}, query},
@@ -82,20 +91,12 @@ export function handleKey(state: InputState, ctx: InputContext, k: InputKey): Re
 	}
 }
 
-/**
- * A message after a key press: `enter` sends it, even when it arrives in the same input as typed text,
- * and `esc`, or `enter` on an empty message, cancels it.
- */
+/** A message after a key press (see `editLine`). Submitting an empty message cancels it. */
 function typeMessage(text: string, k: InputKey): {text: string} | {send: string} | 'cancel' {
-	if (k.escape) return 'cancel';
-	if (k.return) return text.trim() ? {send: text} : 'cancel';
-	if (k.backspace || k.delete) return {text: text.slice(0, -1)};
-	if (k.ctrl && k.input === 'u') return {text: ''};
-	if (k.ctrl || !k.input || k.upArrow || k.downArrow || k.leftArrow || k.rightArrow || k.tab) return {text};
-	const [typed, ...afterEnter] = k.input.split(/[\r\n]/);
-	const next = text + typed.replace(/[\x00-\x1f\x7f]/g, '');
-	if (!afterEnter.length) return {text: next};
-	return next.trim() ? {send: next} : 'cancel';
+	const step = editLine(text, k, {multiline: true});
+	if (step.end === 'cancel') return 'cancel';
+	if (step.end === 'submit') return step.text.trim() ? {send: step.text} : 'cancel';
+	return {text: step.text};
 }
 
 function normalKey(state: InputState, ctx: InputContext, k: InputKey): Result {

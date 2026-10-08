@@ -53,11 +53,11 @@ ghpr looks through the git repos directly under `~/Projects` in the background, 
 
 For every checkout under `~/Projects` whose branch has no open PR, ghpr looks for a merged PR on that branch, and lists any it finds under **merged · workspace left**. `X` cleans one up after you confirm with `y`:
 
-1. It closes the checkout's tmux session, unless ghpr is running in it.
-2. A worktree is removed. A clone is kept and switched back to its default branch, then pulled.
-3. The branch is deleted, and the session's claude state is forgotten.
+1. A worktree is removed. A clone is kept and switched back to its default branch, then pulled.
+2. The branch is deleted.
+3. The checkout's tmux session is closed, unless ghpr is running in it, and the session's claude state is forgotten.
 
-It refuses before changing anything when the checkout has uncommitted changes, or when the branch has commits that aren't in the merged PR.
+It refuses before changing anything when the branch has commits that aren't in the merged PR, or when a clone's default branch isn't known (`git remote set-head origin --auto` sets it). When the checkout has uncommitted changes, it asks again before discarding them; a clone keeps its ignored files. The tmux session is only closed once the git steps have succeeded.
 
 ## Claude sessions
 
@@ -74,18 +74,18 @@ The hooks run `ghpr-claude-state`, which records each session's state in `~/.cac
 ```json
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting", "async": true}]}],
-    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state working", "async": true}]}],
-    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state working", "async": true}]}],
-    "Notification": [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state permission", "async": true}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting", "async": true}]}],
-    "StopFailure": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting", "async": true}]}],
+    "SessionStart": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting"}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state working"}]}],
+    "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state working"}]}],
+    "Notification": [{"matcher": "permission_prompt|elicitation_dialog", "hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state permission"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting"}]}],
+    "StopFailure": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state waiting"}]}],
     "SessionEnd": [{"hooks": [{"type": "command", "command": "~/.local/bin/ghpr-claude-state ended"}]}]
   }
 }
 ```
 
-Claude Code runs no hook when you interrupt it with `esc`, so the session shows as working until its next prompt.
+The hooks run in order rather than in the background, so a late `working` can't overwrite the `waiting` that follows it. Claude Code runs no hook when you interrupt it with `esc`, so the session shows as working until its next prompt. A session that crashes without ending keeps its last state until the next session in that folder, or until `X` cleans the workspace up.
 
 ## Keys
 
@@ -102,7 +102,7 @@ Claude Code runs no hook when you interrupt it with `esc`, so the session shows 
 | `n` / `N` | Next / previous match |
 | `O` | Open the PR in the browser |
 | `o` | Switch to the tmux session for the PR's local checkout, creating it if needed |
-| `c` | Write a message for claude in that session's window named `claude`; `enter` sends, `esc` cancels |
+| `c` | Write a message for claude in that session's window named `claude`; `enter` sends, `esc` cancels. A pasted multi-line message stays together |
 | `X` | Clean up a merged PR's local workspace (see [Cleaning up merged workspaces](#cleaning-up-merged-workspaces)) |
 | `B` | Ask that claude whether the review bot's blocking review is valid, when the bot is requesting changes |
 | `ctrl+g` | Open the PR's repo in GitQueue (`app.gitqueue.com/install/<owner>/<repo>`) |

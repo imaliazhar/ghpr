@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {describe, test} from 'node:test';
-import {handleKey, helpItems, initialInput, type InputContext, type InputKey, type InputState} from '../src/input.js';
+import {confirmDiscard, handleKey, helpItems, initialInput, type InputContext, type InputKey, type InputState} from '../src/input.js';
 import {pr, ready, viewOf} from './fixtures.js';
 
 const list = [pr({title: 'fix Radio'}), pr({title: 'add theme'}), ready({title: 'ship it'})];
@@ -123,5 +123,22 @@ describe('handleKey', () => {
 		assert.deepEqual(press(['!\r'], typed.state, ctx).effects, [{type: 'sendClaude', checkout, text: 'hi there!'}]);
 		assert.deepEqual(press([esc], typed.state, ctx), {state: initialInput, effects: []});
 		assert.deepEqual(press(['c', key('', {return: true})], initialInput, ctx), {state: initialInput, effects: []});
+	});
+
+	test('a pasted multi-line message stays together, and a trailing newline sends it', () => {
+		const checkout = {owner: 'acme', name: 'app', branch: 'b', dir: '/p/app'};
+		const ctx = {...context(), keys: {...context().keys, checkout}};
+		const pasted = press(['c', 'Fix the test\r\nthen rerun lint'], initialInput, ctx);
+		assert.deepEqual(pasted, {state: {mode: {kind: 'compose', checkout, text: 'Fix the test\nthen rerun lint'}, query: ''}, effects: []});
+		assert.deepEqual(press(['\r'], pasted.state, ctx).effects, [{type: 'sendClaude', checkout, text: 'Fix the test\nthen rerun lint'}]);
+	});
+
+	test('asks again before discarding uncommitted changes in a merged workspace', () => {
+		const merged = pr({merged: true});
+		const checkout = {owner: 'acme', name: 'app', branch: 'b', dir: '/p/app-x'};
+		const asked = confirmDiscard(initialInput, merged, checkout);
+		assert.equal(asked.mode.kind === 'confirm' && asked.mode.prompt, 'app-x has uncommitted changes. Discard them and clean up anyway? (y/n)');
+		assert.deepEqual(press(['y'], asked).effects, [{type: 'cleanup', pr: merged, checkout, discard: true}]);
+		assert.deepEqual(press(['n'], asked).effects, [{type: 'flash', text: 'Cancelled', color: 'gray'}]);
 	});
 });

@@ -1,6 +1,6 @@
 import {Fzf, type FzfResultItem} from 'fzf';
 import type {PR} from './github.js';
-import type {KeyPress} from './keymap.js';
+import {editLine, type LineKey} from './lineEdit.js';
 import type {ListView} from './listModel.js';
 
 /** Matched PR urls mapped to the UTF-16 indexes of the matched characters in their titles. */
@@ -43,33 +43,17 @@ const listedPrs = (view: ListView) => view.rows.flatMap(r => (r.kind === 'pr' ? 
 export const searchMatches = (view: ListView, query: string) => matchTitles(listedPrs(view), query);
 
 /**
- * The search after a key press while typing. Typing jumps the cursor to the best match, `enter` stops
- * typing (dropping an empty query) even when it arrives in the same input as typed text, and `esc` or backspace on an empty query drops the search and puts
- * the cursor back on `origin`. `cursor` is omitted when it shouldn't move.
+ * The search after a key press while typing (see `editLine`). Changing the query jumps the cursor to the
+ * best match, submitting stops typing, and cancelling drops the search and puts the cursor back on
+ * `origin`. `cursor` is omitted when it shouldn't move.
  */
-export function typeSearch(
-	query: string,
-	origin: string | null,
-	k: KeyPress & {backspace?: boolean; delete?: boolean},
-	view: ListView,
-): {query: string; typing: boolean; cursor?: string | null} {
-	const cancel = {query: '', typing: false, cursor: origin};
-	if (k.escape) return cancel;
-	if (k.return) return {query, typing: false};
-	let next = query;
-	let typing = true;
-	if (k.backspace || k.delete) {
-		if (!query) return cancel;
-		next = query.slice(0, -1);
-	} else if (k.ctrl && k.input === 'u') next = '';
-	else if (k.ctrl || !k.input || k.upArrow || k.downArrow || k.leftArrow || k.rightArrow || k.tab) return {query, typing: true};
-	else {
-		const [text, ...afterEnter] = k.input.split(/[\r\n]/);
-		next = query + text.replace(/[\x00-\x1f\x7f]/g, '');
-		typing = afterEnter.length === 0;
-	}
-	const {best} = searchMatches(view, next);
-	return best ? {query: next, typing, cursor: best} : {query: next, typing};
+export function typeSearch(query: string, origin: string | null, k: LineKey, view: ListView): {query: string; typing: boolean; cursor?: string | null} {
+	const step = editLine(query, k);
+	if (step.end === 'cancel') return {query: '', typing: false, cursor: origin};
+	const typing = step.end !== 'submit';
+	if (step.text === query) return {query, typing};
+	const {best} = searchMatches(view, step.text);
+	return best ? {query: step.text, typing, cursor: best} : {query: step.text, typing};
 }
 
 /** The next or previous match after the cursor in list order, wrapping around. Null when nothing matches. */

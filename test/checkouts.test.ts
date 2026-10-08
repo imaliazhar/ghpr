@@ -4,8 +4,7 @@ import {mkdirSync, mkdtempSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
-import {checkoutsByPr, scanCheckouts} from '../src/checkouts.js';
-import {pr} from './fixtures.js';
+import {scanCheckouts} from '../src/checkouts.js';
 
 function repo(root: string, name: string, branch: string, origin: string) {
 	const dir = join(root, name);
@@ -30,17 +29,4 @@ test('scans git checkouts under the root, skipping plain folders', async () => {
 
 test('returns nothing for a missing root', async () => {
 	assert.deepEqual(await scanCheckouts('/nonexistent/ghpr'), []);
-});
-
-test('maps PRs to the first checkout on their branch', () => {
-	const a = pr({repo: 'acme/app', headRef: 'feat/x'});
-	const b = pr({repo: 'acme/app', headRef: 'feat/y'});
-	const checkouts = [
-		{owner: 'Acme', name: 'App', branch: 'feat/x', dir: '/p/one'},
-		{owner: 'acme', name: 'app', branch: 'feat/x', dir: '/p/two'},
-		{owner: 'acme', name: 'fork', branch: 'feat/y', dir: '/p/three'},
-	];
-	const map = checkoutsByPr([a, b], checkouts);
-	assert.equal(map.get(a.url)?.dir, '/p/one');
-	assert.equal(map.has(b.url), false);
 });

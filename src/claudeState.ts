@@ -1,4 +1,4 @@
-import {readdir, readFile} from 'node:fs/promises';
+import {readdir, readFile, rm} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
 
@@ -10,7 +10,12 @@ export type ClaudeState = 'working' | 'waiting' | 'permission';
 const STATES = new Set<string>(['working', 'waiting', 'permission']);
 
 /** The state file name for a project folder: its path with every `/` as `%`. */
-export const stateFileName = (dir: string) => dir.replaceAll('/', '%');
+const stateFileName = (dir: string) => dir.replaceAll('/', '%');
+
+/** Forgets the recorded state of the session in `dir`. Never rejects. */
+export async function forgetClaudeState(dir: string, root = CLAUDE_STATE_DIR) {
+	await rm(join(root, stateFileName(dir)), {force: true}).catch(() => {});
+}
 
 /** The recorded state of every Claude Code session by project folder. Never rejects. */
 export async function readClaudeStates(root = CLAUDE_STATE_DIR): Promise<Map<string, ClaudeState>> {

@@ -3,17 +3,17 @@ import {Box, Text, useApp, useInput} from 'ink';
 import {openUrl, queueForMerge, setLabel} from '../actions.js';
 import {hideTmuxPopup, inTmux, inTmuxPopup, openSession, sendToClaude, sessionName} from '../tmux.js';
 import {currentBranch} from '../git.js';
-import {checkoutsByPr, scanCheckouts, type Checkout} from '../checkouts.js';
-import {cleanUpWorkspace} from '../cleanup.js';
-import {isBranchOf} from '../git.js';
+import {scanCheckouts, type Checkout} from '../checkouts.js';
+import {cleanUpWorkspace, UncommittedChangesError} from '../cleanup.js';
 import {fetchMerged, type PR} from '../github.js';
-import {handleKey, helpItems, initialInput, type Effect, type InputContext} from '../input.js';
+import {confirmDiscard, handleKey, helpItems, initialInput, type Effect, type InputContext} from '../input.js';
 import {ARCHIVED_TOGGLE, listView, move, pruneArchived, toggleArchived} from '../listModel.js';
 import {startView} from '../prData.js';
 import {archivedPrs, lastTab} from '../store.js';
 import {searchMatches} from '../search.js';
 import {statusLine, type Message} from '../statusLine.js';
 import {failingChecks, hasLabel} from '../status.js';
+import {workspace, type MergedLookup} from '../workspace.js';
 import {KeyHelp, Spinner, useClaudeStates, useTerminalSize} from './common.js';
 import {DetailScreen} from './DetailScreen.js';
 import {ListScreen} from './ListScreen.js';
@@ -67,12 +67,6 @@ export function App({all}: {all: boolean}) {
 	};
 
 	useEffect(() => {
-		if (!fresh) return;
-		const kept = pruneArchived(archived, mine);
-		if (kept !== archived) updateArchived(kept);
-	}, [fresh, mine]);
-
-	useEffect(() => {
 		if (startViewApplied.current || hasInteracted.current) return;
 		const start = startView(data);
 		if (start === undefined) return;
@@ -88,20 +82,28 @@ export function App({all}: {all: boolean}) {
 
 	useEffect(scan, [scan]);
 
-	const [merged, setMerged] = useState<PR[]>([]);
-	const leftover = useMemo(() => {
-		if (!fresh || !checkouts) return [];
-		const open = current ? [...mine, current] : mine;
-		return checkouts.filter(c => !open.some(pr => isBranchOf(pr, c)));
-	}, [fresh, checkouts, mine, current]);
-	const leftoverKey = leftover.map(c => `${c.dir}@${c.branch}`).join('\n');
-	useEffect(() => {
-		if (leftover.length) fetchMerged(leftover).then(setMerged, () => {});
-		else setMerged([]);
-	}, [leftoverKey]);
-	const listed = useMemo(() => [...mine, ...merged.filter(m => !mine.some(p => p.url === m.url))], [mine, merged]);
+	const [merged, setMerged] = useState<MergedLookup | null>(null);
+	const claudeStates = useClaudeStates();
+	const ws = useMemo(
+		() => workspace({mine, current, fresh, checkouts, merged, claudeStates}),
+		[mine, current, fresh, checkouts, merged, claudeStates],
+	);
+	const {listed, leftover, leftoverKey, checkoutOf, claudeOf} = ws;
 
-	const findPr = (url: string) => listed.find(p => p.url === url) ?? (current?.url === url ? current : undefined);
+	useEffect(() => {
+		if (!leftover.length) return;
+		let cancelled = false;
+		fetchMerged(leftover).then(prs => cancelled || setMerged({key: leftoverKey, prs}), () => {});
+		return () => {
+			cancelled = true;
+		};
+	}, [leftoverKey]);
+
+	useEffect(() => {
+		if (!ws.settled) return;
+		const kept = pruneArchived(archived, listed);
+		if (kept !== archived) updateArchived(kept);
+	}, [ws.settled, listed]);
 
 	const tabs = useMemo(() => buildTabs(listed, archived), [listed, archived]);
 	const activeTab = tabs.some(t => t.repo === tab) ? tab : null;
@@ -109,14 +111,7 @@ export function App({all}: {all: boolean}) {
 	const view = useMemo(() => listView(listed, listOptions, cursor), [listed, listOptions, cursor]);
 	const matches = useMemo(() => searchMatches(view, input.query).matches, [view, input.query]);
 
-	const checkoutMap = useMemo(() => checkoutsByPr(current ? [...listed, current] : listed, checkouts ?? []), [listed, current, checkouts]);
-	const claudeStates = useClaudeStates();
-	const claudeByPr = useMemo(
-		() => new Map([...checkoutMap].flatMap(([url, c]) => (claudeStates.has(c.dir) ? [[url, claudeStates.get(c.dir)!] as const] : []))),
-		[checkoutMap, claudeStates],
-	);
-
-	const detailPr = screen.kind === 'detail' ? findPr(screen.url) : undefined;
+	const detailPr = screen.kind === 'detail' ? ws.find(screen.url) : undefined;
 	const focused = screen.kind === 'detail' ? detailPr : view.cursor ? listed.find(p => p.url === view.cursor) : undefined;
 
 	useEffect(() => {
@@ -149,16 +144,18 @@ export function App({all}: {all: boolean}) {
 		}
 	};
 
-	const cleanUp = async (pr: PR, checkout: Checkout) => {
+	const cleanUp = async (pr: PR, checkout: Checkout, discard = false) => {
 		flash(`Cleaning up ${sessionName(checkout.dir)}…`, 'yellow');
 		try {
-			const done = await cleanUpWorkspace(checkout, pr.headSha);
-			setMerged(m => m.filter(p => p.url !== pr.url));
+			const done = await cleanUpWorkspace(checkout, pr.headSha, {discard});
+			setMerged(m => m && {...m, prs: m.prs.filter(p => p.url !== pr.url)});
 			if (screen.kind === 'detail') setScreen({kind: 'list'});
 			flash(`Cleaned up: ${done.join(', ')}`);
 			scan();
 		} catch (e) {
-			flash(errorText(e), 'red');
+			if (!(e instanceof UncommittedChangesError)) return flash(errorText(e), 'red');
+			setMessage(null);
+			setInput(state => confirmDiscard(state, pr, checkout));
 		}
 	};
 
@@ -182,7 +179,7 @@ export function App({all}: {all: boolean}) {
 			selectedCheck: failing[Math.min(checkIndex, failing.length - 1)],
 			fresh,
 			tmux: inTmuxPopup ? 'popup' : inTmux ? 'pane' : 'none',
-			checkout: focused && checkoutMap.get(focused.url),
+			checkout: focused && checkoutOf.get(focused.url),
 			scanning: checkouts === null,
 		},
 	};
@@ -194,7 +191,7 @@ export function App({all}: {all: boolean}) {
 			case 'queue':
 				return void queue(command.pr);
 			case 'cleanup':
-				return void cleanUp(command.pr, command.checkout);
+				return void cleanUp(command.pr, command.checkout, command.discard);
 			case 'flash':
 				return flash(command.text, command.color);
 			case 'move': {
@@ -265,8 +262,8 @@ export function App({all}: {all: boolean}) {
 				<DetailScreen
 					key={detailPr.url}
 					pr={detailPr}
-					checkout={checkoutMap.get(detailPr.url)}
-					claude={claudeByPr.get(detailPr.url)}
+					checkout={checkoutOf.get(detailPr.url)}
+					claude={claudeOf.get(detailPr.url)}
 					selectedCheck={checkIndex}
 				/>
 			) : !loading && listed.length === 0 ? (
@@ -278,8 +275,8 @@ export function App({all}: {all: boolean}) {
 					view={view}
 					matches={matches}
 					leap={input.mode.kind === 'leap' ? input.mode.leap : null}
-					checkouts={checkoutMap}
-					claude={claudeByPr}
+					checkouts={checkoutOf}
+					claude={claudeOf}
 					showArchived={showArchived}
 					onHeight={setListHeight}
 				/>
