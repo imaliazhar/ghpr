@@ -1,0 +1,22 @@
+{
+  "name": "ghpr",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ghpr": "./bin/ghpr.js"
+  },
+  "scripts": {
+    "start": "tsx src/cli.tsx"
+  },
+  "dependencies": {
+    "ink": "^5.2.1",
+    "react": "^18.3.1",
+    "tsx": "^4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.31",
+    "typescript": "^7.0.2"
+  }
+}
